@@ -1,15 +1,31 @@
 import { computeScores, basketballBreakdown } from './storage.js';
 import { teamColor, teamImage, teamInitial } from './teamVisual.js';
 import { isSafeDataImageUrl } from './imageUtils.js';
+import { formatClockMs } from './gameClock.js';
+import { formatDateES } from './dateFormat.js';
 
 function escapeCanvasText(s) {
   return String(s ?? '').replace(/\n/g, ' ');
 }
 
+function buildTimelineLines(match) {
+  const evs = match.events || [];
+  const lines = [];
+  for (const ev of evs) {
+    if (ev.team !== 'A' && ev.team !== 'B') continue;
+    const team = ev.team === 'A' ? match.teamA : match.teamB;
+    const time = ev.gameTimeMs != null ? formatClockMs(ev.gameTimeMs) : '—';
+    const who = ev.playerName ? ` · ${ev.playerName}` : '';
+    const label = match.sport === 'soccer' ? 'Gol' : `+${ev.points}`;
+    lines.push(`${time} · ${team}${who} · ${label}`);
+  }
+  return lines;
+}
+
 export function buildShareText(match) {
   const { scoreA, scoreB } = computeScores(match);
   const sport = match.sport === 'soccer' ? 'Fútbol' : 'Baloncesto';
-  const date = match.date || '—';
+  const date = formatDateES(match.date);
   const place = match.place || '—';
   let body = `🏆 ${sport}\n`;
   body += `${match.teamA} ${scoreA} - ${scoreB} ${match.teamB}\n`;
@@ -18,6 +34,10 @@ export function buildShareText(match) {
     const bd = basketballBreakdown(match.events);
     body += `\nDetalle ${match.teamA}: TL ${bd.A[1]}, dobles ${bd.A[2]}, triples ${bd.A[3]}\n`;
     body += `Detalle ${match.teamB}: TL ${bd.B[1]}, dobles ${bd.B[2]}, triples ${bd.B[3]}\n`;
+  }
+  const timeline = buildTimelineLines(match);
+  if (timeline.length) {
+    body += `\nCronología:\n${timeline.join('\n')}\n`;
   }
   body += `\n— Marcador de partidos`;
   return body;
@@ -95,7 +115,7 @@ export async function renderMatchSummaryImage(match) {
 
   ctx.font = '500 28px system-ui, sans-serif';
   ctx.fillStyle = '#8da4c0';
-  ctx.fillText(escapeCanvasText(`${match.date || '—'}  ·  ${match.place || '—'}`), w / 2, 118);
+  ctx.fillText(escapeCanvasText(`${formatDateES(match.date)}  ·  ${match.place || '—'}`), w / 2, 118);
 
   ctx.fillStyle = '#c9a227';
   ctx.font = '700 32px system-ui, sans-serif';

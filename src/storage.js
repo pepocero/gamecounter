@@ -82,6 +82,14 @@ function isValidHexColor(c) {
   return typeof c === 'string' && /^#[0-9A-Fa-f]{6}$/.test(c);
 }
 
+function validatePlayerEntry(p) {
+  if (!p || typeof p !== 'object') return false;
+  if (typeof p.id !== 'string' || !p.id.trim()) return false;
+  if (typeof p.name !== 'string' || !String(p.name).trim()) return false;
+  if (String(p.name).length > 120) return false;
+  return true;
+}
+
 function validateSavedTeamRaw(t) {
   if (!t || typeof t !== 'object') return false;
   if (typeof t.id !== 'string' || !t.id.trim()) return false;
@@ -90,6 +98,33 @@ function validateSavedTeamRaw(t) {
   if (t.image != null) {
     if (typeof t.image !== 'string' || !t.image.startsWith('data:image/')) return false;
     if (t.image.length > 3_000_000) return false;
+  }
+  if (t.players != null) {
+    if (!Array.isArray(t.players)) return false;
+    if (t.players.length > 50) return false;
+    for (const p of t.players) {
+      if (!validatePlayerEntry(p)) return false;
+    }
+  }
+  return true;
+}
+
+function validateRosterOptional(roster) {
+  if (roster == null) return true;
+  if (!Array.isArray(roster)) return false;
+  if (roster.length > 50) return false;
+  for (const p of roster) {
+    if (!validatePlayerEntry(p)) return false;
+  }
+  return true;
+}
+
+function validateClockOptional(clock) {
+  if (clock == null) return true;
+  if (typeof clock !== 'object') return false;
+  if (typeof clock.elapsedMs !== 'number' || !Number.isFinite(clock.elapsedMs) || clock.elapsedMs < 0) return false;
+  if (clock.runningSince != null) {
+    if (typeof clock.runningSince !== 'number' || !Number.isFinite(clock.runningSince)) return false;
   }
   return true;
 }
@@ -101,6 +136,9 @@ function validateMatchRaw(m) {
   if (typeof m.teamA !== 'string' || typeof m.teamB !== 'string') return false;
   if (!Array.isArray(m.events)) return false;
   if (m.status !== 'live' && m.status !== 'finished' && m.status !== 'scheduled') return false;
+  if (!validateRosterOptional(m.rosterA)) return false;
+  if (!validateRosterOptional(m.rosterB)) return false;
+  if (!validateClockOptional(m.clock)) return false;
   return true;
 }
 

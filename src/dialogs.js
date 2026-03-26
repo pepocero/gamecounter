@@ -150,3 +150,103 @@ export function showConfirm(message, opts = {}) {
     btnOk.focus();
   });
 }
+
+let playerPickerLayer = null;
+
+/**
+ * Elige jugador para una anotación.
+ * @param {{ players: { id: string, name: string }[], title?: string }} opts
+ * @returns {Promise<{ playerId: string | null, playerName: string | null } | false>}
+ *          `false` = cancelado; si `players` está vacío, resuelve sin asignar.
+ */
+export function showPlayerPicker(opts) {
+  const { players = [], title = '¿Quién anotó?' } = opts;
+
+  return new Promise((resolve) => {
+    if (!Array.isArray(players) || players.length === 0) {
+      resolve({ playerId: null, playerName: null });
+      return;
+    }
+
+    if (playerPickerLayer) {
+      playerPickerLayer.remove();
+      playerPickerLayer = null;
+    }
+
+    const backdrop = document.createElement('div');
+    backdrop.className = 'modal-backdrop';
+    backdrop.setAttribute('role', 'dialog');
+    backdrop.setAttribute('aria-modal', 'true');
+    backdrop.setAttribute('aria-labelledby', 'player-picker-title');
+
+    const card = document.createElement('div');
+    card.className = 'modal-card modal-card--scroll';
+
+    const accent = document.createElement('div');
+    accent.className = 'modal-accent';
+    accent.setAttribute('aria-hidden', 'true');
+
+    const h = document.createElement('h2');
+    h.id = 'player-picker-title';
+    h.className = 'modal-title';
+    h.textContent = title;
+
+    const listWrap = document.createElement('div');
+    listWrap.className = 'player-picker-list';
+
+    const finish = (value) => {
+      document.removeEventListener('keydown', onKey);
+      backdrop.classList.add('modal-backdrop--out');
+      window.setTimeout(() => {
+        backdrop.remove();
+        if (playerPickerLayer === backdrop) playerPickerLayer = null;
+        document.body.style.overflow = '';
+        resolve(value);
+      }, 180);
+    };
+
+    function onKey(e) {
+      if (e.key === 'Escape') finish(false);
+    }
+
+    for (const p of players) {
+      const b = document.createElement('button');
+      b.type = 'button';
+      b.className = 'btn btn-block player-picker-name';
+      b.textContent = p.name || '—';
+      b.addEventListener('click', () => finish({ playerId: p.id, playerName: p.name }));
+      listWrap.appendChild(b);
+    }
+
+    const btnUnassigned = document.createElement('button');
+    btnUnassigned.type = 'button';
+    btnUnassigned.className = 'btn btn-block btn-modal-secondary';
+    btnUnassigned.textContent = 'Sin asignar';
+
+    const btnCancel = document.createElement('button');
+    btnCancel.type = 'button';
+    btnCancel.className = 'btn btn-block btn-ghost';
+    btnCancel.textContent = 'Cancelar';
+
+    btnUnassigned.addEventListener('click', () => finish({ playerId: null, playerName: null }));
+    btnCancel.addEventListener('click', () => finish(false));
+    backdrop.addEventListener('click', (e) => {
+      if (e.target === backdrop) finish(false);
+    });
+
+    document.addEventListener('keydown', onKey);
+
+    card.appendChild(accent);
+    card.appendChild(h);
+    card.appendChild(listWrap);
+    card.appendChild(btnUnassigned);
+    card.appendChild(btnCancel);
+    backdrop.appendChild(card);
+
+    document.body.style.overflow = 'hidden';
+    document.body.appendChild(backdrop);
+    playerPickerLayer = backdrop;
+    requestAnimationFrame(() => backdrop.classList.add('modal-backdrop--in'));
+    btnUnassigned.focus();
+  });
+}

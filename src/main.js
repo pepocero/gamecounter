@@ -25,7 +25,19 @@ import {
 } from './share.js';
 import { teamColor, teamImage, teamInitial, DEFAULT_COLOR_A, DEFAULT_COLOR_B } from './teamVisual.js';
 import { fileToResizedJpegDataUrl, isSafeDataImageUrl } from './imageUtils.js';
-import { showToast, showConfirm } from './dialogs.js';
+import { showToast, showConfirm, showPlayerPicker } from './dialogs.js';
+import {
+  createInitialClock,
+  ensureClock,
+  getElapsedMs,
+  startClock,
+  pauseClock,
+  formatClockMs,
+  isClockRunning,
+  isClockAtZeroStopped,
+  resetClock
+} from './gameClock.js';
+import { formatDateES } from './dateFormat.js';
 
 function whatsAppTextUrl(text) {
   const q = encodeURIComponent(text);
@@ -57,6 +69,25 @@ function downloadJsonFile(filename, jsonString) {
   a.download = filename;
   a.click();
   URL.revokeObjectURL(url);
+}
+
+/** Parsea líneas de texto a plantilla de jugadores con id único. */
+function rosterFromTextarea(text) {
+  return String(text || '')
+    .split(/\r?\n/)
+    .map((s) => s.trim())
+    .filter(Boolean)
+    .slice(0, 50)
+    .map((name) => ({ id: newId(), name: name.slice(0, 120) }));
+}
+
+let liveClockIntervalId = null;
+
+function clearLiveClockTimer() {
+  if (liveClockIntervalId != null) {
+    window.clearInterval(liveClockIntervalId);
+    liveClockIntervalId = null;
+  }
 }
 
 function todayISODate() {
@@ -268,6 +299,7 @@ function viewNew() {
     </div>
     <h1>Nuevo partido</h1>
     <form class="stack" id="form-new">
+      <input type="hidden" name="formAction" id="formNewIntent" value="schedule" />
       <div class="card">
         <label for="sport">Deporte</label>
         <select id="sport" name="sport" required>
@@ -303,6 +335,11 @@ function viewNew() {
           <div class="team-badge-slot" style="width:72px;height:72px;" id="previewSlotA"></div>
           <button type="button" class="btn btn-ghost" id="clearImgA" style="min-height:44px;">Quitar imagen</button>
         </div>
+        <div style="margin-top:12px;">
+          <label for="rosterALines">Jugadores (opcional, uno por línea)</label>
+          <textarea id="rosterALines" name="rosterALines" rows="4" maxlength="8000" autocomplete="off" placeholder="Si los indicas, al anotar podrás elegir quién marcó cada tanto."></textarea>
+          <p class="preview-hint">Al elegir un equipo guardado con plantilla, se rellenan estos nombres.</p>
+        </div>
       </div>
 
       <div class="team-setup team-setup--away">
@@ -331,6 +368,10 @@ function viewNew() {
           <div class="team-badge-slot" style="width:72px;height:72px;" id="previewSlotB"></div>
           <button type="button" class="btn btn-ghost" id="clearImgB" style="min-height:44px;">Quitar imagen</button>
         </div>
+        <div style="margin-top:12px;">
+          <label for="rosterBLines">Jugadores (opcional, uno por línea)</label>
+          <textarea id="rosterBLines" name="rosterBLines" rows="4" maxlength="8000" autocomplete="off" placeholder="Un nombre por línea."></textarea>
+        </div>
       </div>
 
       <div class="card">
@@ -345,8 +386,8 @@ function viewNew() {
       </div>
       <p class="msg new-match-hint">Programa el partido para otro día o empieza el marcador ya.</p>
       <div class="stack new-match-actions">
-        <button type="submit" name="formAction" value="schedule" class="btn btn-primary btn-block">Programar partido</button>
-        <button type="submit" name="formAction" value="live" class="btn btn-block">Comenzar partido ahora</button>
+        <button type="submit" id="formNewSubmitSchedule" class="btn btn-primary btn-block">Programar partido</button>
+        <button type="submit" id="formNewSubmitLive" class="btn btn-block">Comenzar partido ahora</button>
       </div>
     </form>
   `;
@@ -379,16 +420,19 @@ function bindNew() {
     if (!teamId) return;
     const t = getSavedTeam(teamId);
     if (!t) return;
+    const rosterLines = (t.players || []).map((p) => p.name).join('\n');
     if (side === 'A') {
       app.querySelector('#teamA').value = t.name;
       app.querySelector('#teamAColor').value = t.color;
       pending.teamAImage = t.image && isSafeDataImageUrl(t.image) ? t.image : null;
       app.querySelector('#fileTeamA').value = '';
+      app.querySelector('#rosterALines').value = rosterLines;
     } else {
       app.querySelector('#teamB').value = t.name;
       app.querySelector('#teamBColor').value = t.color;
       pending.teamBImage = t.image && isSafeDataImageUrl(t.image) ? t.image : null;
       app.querySelector('#fileTeamB').value = '';
+      app.querySelector('#rosterBLines').value = rosterLines;
     }
     refreshPreview('A');
     refreshPreview('B');
@@ -448,10 +492,21 @@ function bindNew() {
   refreshPreview('A');
   refreshPreview('B');
 
+  const intentInput = app.querySelector('#formNewIntent');
+  app.querySelector('#formNewSubmitSchedule').addEventListener('click', () => {
+    if (intentInput) intentInput.value = 'schedule';
+  });
+  app.querySelector('#formNewSubmitLive').addEventListener('click', () => {
+    if (intentInput) intentInput.value = 'live';
+  });
+
   app.querySelector('#form-new').onsubmit = (e) => {
     e.preventDefault();
     const fd = new FormData(e.target);
-    const formAction = String(fd.get('formAction') || 'live');
+    let formAction = String(fd.get('formAction') || '').trim();
+    if (formAction !== 'schedule' && formAction !== 'live') {
+      formAction = 'schedule';
+    }
     const schedule = formAction === 'schedule';
     const sport = fd.get('sport');
     const teamA = String(fd.get('teamA') || '').trim();
@@ -465,6 +520,8 @@ function bindNew() {
     if (!teamA || !teamB || !date) return;
 
     const now = Date.now();
+    const rosterA = rosterFromTextarea(String(fd.get('rosterALines') || ''));
+    const rosterB = rosterFromTextarea(String(fd.get('rosterBLines') || ''));
     const match = {
       id: newId(),
       sport,
@@ -476,6 +533,9 @@ function bindNew() {
       teamBImage: pending.teamBImage && isSafeDataImageUrl(pending.teamBImage) ? pending.teamBImage : null,
       date,
       place,
+      rosterA,
+      rosterB,
+      clock: createInitialClock(),
       events: [],
       status: schedule ? 'scheduled' : 'live',
       startedAt: schedule ? null : now,
@@ -484,12 +544,42 @@ function bindNew() {
     };
     saveMatch(match);
     if (schedule) {
+      try {
+        sessionStorage.setItem('gamecounterHighlightUpcoming', match.id);
+      } catch {
+        /* ignore */
+      }
       showToast('Partido guardado en Próximos partidos.', { variant: 'success' });
       navigate('upcoming');
     } else {
       navigate('live', match.id);
     }
   };
+}
+
+/** Lista HTML de anotaciones en vivo (tiempo, equipo, jugador, tipo). */
+function liveScoringLogContentHtml(m) {
+  const evs = m.events || [];
+  if (evs.length === 0) {
+    return '<p class="live-scoring-log-empty">Aún no hay anotaciones.</p>';
+  }
+  const items = evs
+    .map((ev) => {
+      if (ev.team !== 'A' && ev.team !== 'B') return '';
+      const teamName = ev.team === 'A' ? m.teamA : m.teamB;
+      const time = ev.gameTimeMs != null ? formatClockMs(ev.gameTimeMs) : '—';
+      const who = ev.playerName
+        ? escapeHtml(ev.playerName)
+        : '<span class="live-scoring-log-unassigned">Sin asignar</span>';
+      const label = m.sport === 'soccer' ? 'Gol' : `+${ev.points}`;
+      return `<li class="live-scoring-log-item">
+        <span class="live-scoring-log-time">${escapeHtml(time)}</span>
+        <span class="live-scoring-log-body">${escapeHtml(teamName)} · ${who} · <span class="live-scoring-log-pts">${escapeHtml(label)}</span></span>
+      </li>`;
+    })
+    .filter(Boolean)
+    .join('');
+  return `<ul class="live-scoring-log-list">${items}</ul>`;
 }
 
 function viewLive(m) {
@@ -522,7 +612,20 @@ function viewLive(m) {
         <span>● LIVE</span>
         <span>${sportLabel}</span>
       </div>
-      <div class="broadcast-meta">${escapeHtml(m.date)} · ${escapeHtml(m.place || '—')}</div>
+      <div class="broadcast-meta">${escapeHtml(formatDateES(m.date))} · ${escapeHtml(m.place || '—')}</div>
+      <div class="game-clock-bar">
+        <div class="game-clock-row">
+          <span class="game-clock-label">Tiempo de juego</span>
+          <span class="game-clock-display" id="gameClockDisplay">00:00</span>
+        </div>
+        <div class="game-clock-actions">
+          <button type="button" class="btn btn-ghost btn-sm" id="gameClockStart">Iniciar</button>
+          <button type="button" class="btn btn-ghost btn-sm" id="gameClockPause" hidden>Pausa</button>
+          <button type="button" class="btn btn-ghost btn-sm" id="gameClockResume" hidden>Reanudar</button>
+          <button type="button" class="btn btn-ghost btn-sm" id="gameClockReset" hidden>Reiniciar</button>
+        </div>
+        <p class="game-clock-hint">Inicia, pausa, reanuda o reinicia el tiempo a 00:00. Cada anotación guarda el tiempo mostrado.</p>
+      </div>
       <div class="broadcast-scores">
         <div class="team-col">
           <div class="team-badge-slot" data-team-badge="A"></div>
@@ -536,6 +639,14 @@ function viewLive(m) {
           <div class="team-badge-slot" data-team-badge="B"></div>
           <div class="team-name-broadcast">${escapeHtml(m.teamB)}</div>
           <div class="${isSoccer ? 'point-grid soccer' : ''}">${ptsB}</div>
+        </div>
+      </div>
+      <div class="live-scoring-log">
+        <button type="button" class="live-scoring-log-toggle" id="liveScoringLogToggle" aria-expanded="false" aria-controls="liveScoringLogPanel">
+          Anotaciones · jugador y tiempo
+        </button>
+        <div class="live-scoring-log-panel" id="liveScoringLogPanel" hidden>
+          ${liveScoringLogContentHtml(m)}
         </div>
       </div>
       <div class="broadcast-actions">
@@ -568,16 +679,45 @@ function bindScoreButtons(app, m) {
   buttons.forEach((btn) => {
     let pressTimer = null;
     let longPressFired = false;
+    let addBusy = false;
 
-    const applyAdd = () => {
+    const applyAdd = async () => {
       const team = btn.getAttribute('data-team');
       const pt = parseInt(btn.getAttribute('data-pt'), 10);
       if (!validatePointButton(m, team, pt)) return;
+      if (addBusy) return;
       const cur = getMatch(m.id);
       if (!cur || cur.status !== 'live') return;
-      cur.events = cur.events || [];
-      cur.events.push({ team, points: pt, at: Date.now() });
-      saveMatch(cur);
+      cur.clock = ensureClock(cur.clock);
+      const roster = team === 'A' ? cur.rosterA || [] : cur.rosterB || [];
+      addBusy = true;
+      let pick = { playerId: null, playerName: null };
+      if (roster.length > 0) {
+        const teamLabel = team === 'A' ? cur.teamA : cur.teamB;
+        const r = await showPlayerPicker({
+          players: roster,
+          title: `¿Quién anotó? (${teamLabel})`
+        });
+        if (r === false) {
+          addBusy = false;
+          return;
+        }
+        pick = r;
+      }
+      const cur2 = getMatch(m.id);
+      if (!cur2 || cur2.status !== 'live') {
+        addBusy = false;
+        return;
+      }
+      cur2.clock = ensureClock(cur2.clock);
+      const gameTimeMs = getElapsedMs(cur2.clock);
+      cur2.events = cur2.events || [];
+      const ev = { team, points: pt, at: Date.now(), gameTimeMs };
+      if (pick.playerId != null) ev.playerId = pick.playerId;
+      if (pick.playerName) ev.playerName = pick.playerName;
+      cur2.events.push(ev);
+      saveMatch(cur2);
+      addBusy = false;
       refreshLiveView(app, m.id);
     };
 
@@ -620,7 +760,7 @@ function bindScoreButtons(app, m) {
         refreshLiveView(app, m.id);
         return;
       }
-      applyAdd();
+      void applyAdd();
     });
 
     btn.addEventListener('pointercancel', clearTimer);
@@ -628,7 +768,7 @@ function bindScoreButtons(app, m) {
     btn.addEventListener('keydown', (e) => {
       if (e.key !== 'Enter' && e.key !== ' ') return;
       e.preventDefault();
-      applyAdd();
+      void applyAdd();
     });
 
     btn.addEventListener('contextmenu', (e) => e.preventDefault());
@@ -636,7 +776,105 @@ function bindScoreButtons(app, m) {
 }
 
 function bindLive(m) {
+  clearLiveClockTimer();
   const app = document.getElementById('app');
+  const display = app.querySelector('#gameClockDisplay');
+  const btnStart = app.querySelector('#gameClockStart');
+  const btnPause = app.querySelector('#gameClockPause');
+  const btnResume = app.querySelector('#gameClockResume');
+  const btnReset = app.querySelector('#gameClockReset');
+
+  function updateClockUI() {
+    const cur = getMatch(m.id);
+    if (!cur || !display) return;
+    if (!cur.clock) cur.clock = createInitialClock();
+    else cur.clock = ensureClock(cur.clock);
+    const ms = getElapsedMs(cur.clock);
+    display.textContent = formatClockMs(ms);
+    if (!btnStart || !btnPause || !btnResume) return;
+    const running = isClockRunning(cur.clock);
+    const atZeroStopped = isClockAtZeroStopped(cur.clock);
+    const pausedWithTime = !running && !atZeroStopped;
+    btnStart.hidden = !atZeroStopped;
+    btnPause.hidden = !running;
+    btnResume.hidden = !pausedWithTime;
+    if (btnReset) btnReset.hidden = atZeroStopped;
+  }
+
+  updateClockUI();
+  const curInit = getMatch(m.id);
+  if (curInit && isClockRunning(ensureClock(curInit.clock))) {
+    liveClockIntervalId = window.setInterval(updateClockUI, 250);
+  }
+
+  if (btnStart) {
+    btnStart.onclick = () => {
+      const cur = getMatch(m.id);
+      if (!cur) return;
+      cur.clock = ensureClock(cur.clock);
+      startClock(cur.clock);
+      saveMatch(cur);
+      clearLiveClockTimer();
+      liveClockIntervalId = window.setInterval(updateClockUI, 250);
+      updateClockUI();
+    };
+  }
+  if (btnPause) {
+    btnPause.onclick = () => {
+      const cur = getMatch(m.id);
+      if (!cur) return;
+      cur.clock = ensureClock(cur.clock);
+      pauseClock(cur.clock);
+      saveMatch(cur);
+      clearLiveClockTimer();
+      updateClockUI();
+    };
+  }
+  if (btnResume) {
+    btnResume.onclick = () => {
+      const cur = getMatch(m.id);
+      if (!cur) return;
+      cur.clock = ensureClock(cur.clock);
+      startClock(cur.clock);
+      saveMatch(cur);
+      clearLiveClockTimer();
+      liveClockIntervalId = window.setInterval(updateClockUI, 250);
+      updateClockUI();
+    };
+  }
+  const logToggle = app.querySelector('#liveScoringLogToggle');
+  const logPanel = app.querySelector('#liveScoringLogPanel');
+  if (logToggle && logPanel) {
+    logToggle.addEventListener('click', (e) => {
+      e.stopPropagation();
+      logPanel.hidden = !logPanel.hidden;
+      logToggle.setAttribute('aria-expanded', logPanel.hidden ? 'false' : 'true');
+    });
+  }
+
+  if (btnReset) {
+    btnReset.onclick = async () => {
+      const ok = await showConfirm(
+        'El cronómetro volverá a 00:00. Las anotaciones ya guardadas no se borran.',
+        {
+          title: '¿Reiniciar el tiempo de juego?',
+          confirmText: 'Reiniciar',
+          cancelText: 'Cancelar',
+          danger: true
+        }
+      );
+      if (!ok) return;
+      const cur = getMatch(m.id);
+      if (!cur) return;
+      if (!cur.clock) cur.clock = createInitialClock();
+      else ensureClock(cur.clock);
+      resetClock(cur.clock);
+      saveMatch(cur);
+      clearLiveClockTimer();
+      updateClockUI();
+    };
+  }
+
   app.querySelector('[data-abort]').onclick = async () => {
     const ok = await showConfirm(
       'El partido quedará en curso. Podrás continuar desde Historial cuando quieras.',
@@ -661,15 +899,40 @@ function bindLive(m) {
       if (!ok) return;
       const cur = getMatch(m.id);
       if (!cur) return;
+      cur.clock = ensureClock(cur.clock);
+      pauseClock(cur.clock);
       cur.status = 'finished';
       cur.endedAt = Date.now();
       saveMatch(cur);
+      clearLiveClockTimer();
       navigate('share', m.id);
       return;
     }
   };
 
   bindScoreButtons(app, m);
+}
+
+function viewShareTimelineHtml(m) {
+  const evs = m.events || [];
+  if (evs.length === 0) return '';
+  const items = evs
+    .map((ev) => {
+      if (ev.team !== 'A' && ev.team !== 'B') return '';
+      const team = ev.team === 'A' ? m.teamA : m.teamB;
+      const time = ev.gameTimeMs != null ? formatClockMs(ev.gameTimeMs) : '—';
+      const who = ev.playerName ? ` · ${escapeHtml(ev.playerName)}` : '';
+      const label = m.sport === 'soccer' ? 'Gol' : `+${ev.points}`;
+      return `<li>${escapeHtml(time)} · ${escapeHtml(team)}${who} · ${escapeHtml(label)}</li>`;
+    })
+    .filter(Boolean)
+    .join('');
+  if (!items) return '';
+  return `
+    <div class="card" style="margin-top:12px;">
+      <h2>Cronología</h2>
+      <ul class="share-timeline">${items}</ul>
+    </div>`;
 }
 
 function viewShare(m) {
@@ -700,7 +963,7 @@ function viewShare(m) {
         <div class="share-team-mini"><div class="team-badge-slot" data-team-badge="A"></div></div>
         <div>
           <div class="share-score-line">${scoreA} — ${scoreB}</div>
-          <p style="margin:6px 0 0;font-size:0.9rem;color:var(--muted);text-align:center;">${escapeHtml(m.date)} · ${escapeHtml(m.place || '—')}</p>
+          <p style="margin:6px 0 0;font-size:0.9rem;color:var(--muted);text-align:center;">${escapeHtml(formatDateES(m.date))} · ${escapeHtml(m.place || '—')}</p>
         </div>
         <div class="share-team-mini"><div class="team-badge-slot" data-team-badge="B"></div></div>
       </div>
@@ -709,6 +972,7 @@ function viewShare(m) {
       </p>
     </div>
     ${detail}
+    ${viewShareTimelineHtml(m)}
     <p class="msg" id="share-msg" style="display:none;"></p>
     <div class="stack" style="margin-top: 16px;">
       <button type="button" class="btn btn-primary btn-block" data-share-wa>Compartir por WhatsApp</button>
@@ -804,7 +1068,7 @@ function viewHistory() {
           <span class="list-mini-badge" data-history-badge="A" data-mid="${escapeHtml(m.id)}"></span>
           <span class="list-item-text">
             ${escapeHtml(m.teamA)} ${scoreA} - ${scoreB} ${escapeHtml(m.teamB)}
-            <small>${escapeHtml(sp)} · ${escapeHtml(m.date)} · ${escapeHtml(st)}</small>
+            <small>${escapeHtml(sp)} · ${escapeHtml(formatDateES(m.date))} · ${escapeHtml(st)}</small>
           </span>
           <span class="list-mini-badge" data-history-badge="B" data-mid="${escapeHtml(m.id)}"></span>
         </button>`;
@@ -869,10 +1133,10 @@ function viewUpcoming() {
     .map((m) => {
       const sp = m.sport === 'soccer' ? 'Fútbol' : 'Baloncesto';
       return `
-        <div class="card upcoming-card">
+        <div class="card upcoming-card" data-upcoming-card="${escapeHtml(m.id)}">
           <div class="upcoming-card__head">
             <span class="upcoming-badge">Programado</span>
-            <span class="upcoming-date">${escapeHtml(m.date)}</span>
+            <span class="upcoming-date">${escapeHtml(formatDateES(m.date))}</span>
           </div>
           <p class="upcoming-place">${escapeHtml(m.place || 'Sin lugar')}</p>
           <div class="upcoming-teams">
@@ -909,6 +1173,25 @@ function bindUpcoming() {
   app.querySelector('[data-back]')?.addEventListener('click', () => navigate('home'));
   app.querySelector('[data-go-new]')?.addEventListener('click', () => navigate('new'));
 
+  let highlightId = null;
+  try {
+    highlightId = sessionStorage.getItem('gamecounterHighlightUpcoming');
+    if (highlightId) sessionStorage.removeItem('gamecounterHighlightUpcoming');
+  } catch {
+    /* ignore */
+  }
+  if (highlightId) {
+    const safe = String(highlightId).replace(/\\/g, '\\\\').replace(/"/g, '\\"');
+    const card = app.querySelector(`[data-upcoming-card="${safe}"]`);
+    if (card) {
+      card.classList.add('upcoming-card--just-added');
+      requestAnimationFrame(() => {
+        card.scrollIntoView({ block: 'nearest', behavior: 'smooth' });
+      });
+      window.setTimeout(() => card.classList.remove('upcoming-card--just-added'), 4500);
+    }
+  }
+
   upcomingMatchesSorted().forEach((m) => {
     ['A', 'B'].forEach((side) => {
       const slot = app.querySelector(`[data-up-badge="${side}"][data-up-mid="${m.id}"]`);
@@ -923,6 +1206,9 @@ function bindUpcoming() {
       if (!cur || cur.status !== 'scheduled') return;
       cur.status = 'live';
       cur.startedAt = Date.now();
+      if (!cur.clock) cur.clock = createInitialClock();
+      if (!Array.isArray(cur.rosterA)) cur.rosterA = [];
+      if (!Array.isArray(cur.rosterB)) cur.rosterB = [];
       saveMatch(cur);
       navigate('live', id);
     });
@@ -1035,7 +1321,7 @@ function viewStatsBySport(sport) {
       return `
         <button type="button" class="stats-detail-row" data-open-share="${escapeHtml(m.id)}">
           <div class="stats-detail-row__meta">
-            <span class="stats-detail-date">${escapeHtml(m.date)}</span>
+            <span class="stats-detail-date">${escapeHtml(formatDateES(m.date))}</span>
             <span class="stats-detail-place" title="${escapeHtml(m.place || '')}">${escapeHtml(m.place || 'Sin lugar')}</span>
           </div>
           <div class="stats-detail-teams">
@@ -1184,13 +1470,17 @@ function viewTeams() {
       <button type="button" class="btn btn-ghost back" data-back-settings>← Configuración</button>
     </div>
     <h1>Equipos guardados</h1>
-    <p class="msg">Estos equipos aparecen al crear un partido. Las imágenes se incluyen en exportación JSON.</p>
+    <p class="msg">Estos equipos aparecen al crear un partido. Puedes guardar la plantilla de jugadores para asignar cada tanto en vivo. Las imágenes se incluyen en exportación JSON.</p>
     <form class="card team-lib-form" id="form-team-lib">
       <input type="hidden" id="teamLibEditId" value="" />
       <h2 id="teamLibFormTitle">Nuevo equipo</h2>
       <div>
         <label for="teamLibName">Nombre</label>
         <input id="teamLibName" name="name" required maxlength="80" autocomplete="off" placeholder="Nombre del equipo" />
+      </div>
+      <div style="margin-top:12px;">
+        <label for="teamLibPlayers">Jugadores (opcional, uno por línea)</label>
+        <textarea id="teamLibPlayers" name="players" rows="5" maxlength="8000" autocomplete="off" placeholder="Ej. Ana García&#10;Luis Pérez"></textarea>
       </div>
       <div style="margin-top:12px;">
         <label for="teamLibColor">Color</label>
@@ -1264,6 +1554,7 @@ function bindTeams() {
     pendingImage = null;
     app.querySelector('#teamLibEditId').value = '';
     app.querySelector('#teamLibName').value = '';
+    app.querySelector('#teamLibPlayers').value = '';
     app.querySelector('#teamLibColor').value = DEFAULT_COLOR_A;
     app.querySelector('#teamLibFile').value = '';
     app.querySelector('#teamLibFormTitle').textContent = 'Nuevo equipo';
@@ -1302,11 +1593,13 @@ function bindTeams() {
     if (!/^#[0-9A-Fa-f]{6}$/.test(color)) color = DEFAULT_COLOR_A;
     const editId = app.querySelector('#teamLibEditId').value;
     const img = pendingImage && isSafeDataImageUrl(pendingImage) ? pendingImage : null;
+    const players = rosterFromTextarea(String(app.querySelector('#teamLibPlayers')?.value || ''));
     const team = {
       id: editId || newId(),
       name,
       color,
-      image: img
+      image: img,
+      players
     };
     saveSavedTeam(team);
     showToast(editId ? 'Equipo actualizado' : 'Equipo guardado', { variant: 'success' });
@@ -1323,6 +1616,7 @@ function bindTeams() {
       pendingImage = t.image && isSafeDataImageUrl(t.image) ? t.image : null;
       app.querySelector('#teamLibEditId').value = t.id;
       app.querySelector('#teamLibName').value = t.name;
+      app.querySelector('#teamLibPlayers').value = (t.players || []).map((p) => p.name).join('\n');
       app.querySelector('#teamLibColor').value = t.color;
       app.querySelector('#teamLibFile').value = '';
       app.querySelector('#teamLibFormTitle').textContent = 'Editar equipo';

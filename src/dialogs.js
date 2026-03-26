@@ -194,7 +194,10 @@ export function showPlayerPicker(opts) {
     const listWrap = document.createElement('div');
     listWrap.className = 'player-picker-list';
 
+    let settled = false;
     const finish = (value) => {
+      if (settled) return;
+      settled = true;
       document.removeEventListener('keydown', onKey);
       backdrop.classList.add('modal-backdrop--out');
       window.setTimeout(() => {
@@ -249,4 +252,41 @@ export function showPlayerPicker(opts) {
     requestAnimationFrame(() => backdrop.classList.add('modal-backdrop--in'));
     btnUnassigned.focus();
   });
+}
+
+let pwaUpdateBannerEl = null;
+
+/** Barra fija cuando hay una nueva versión de la PWA lista para aplicar. */
+export function showPwaUpdateBanner(applyUpdate) {
+  if (typeof applyUpdate !== 'function') return;
+  if (pwaUpdateBannerEl && document.body.contains(pwaUpdateBannerEl)) return;
+
+  const bar = document.createElement('div');
+  bar.className = 'pwa-update-banner';
+  bar.setAttribute('role', 'status');
+  bar.innerHTML = `
+    <span class="pwa-update-banner-text">Nueva versión de GameScore disponible.</span>
+    <button type="button" class="btn btn-primary btn-sm pwa-update-banner-apply">Actualizar</button>
+    <button type="button" class="pwa-update-banner-dismiss" aria-label="Más tarde">×</button>
+  `;
+
+  const remove = () => {
+    if (pwaUpdateBannerEl && pwaUpdateBannerEl.parentNode) {
+      pwaUpdateBannerEl.remove();
+    }
+    pwaUpdateBannerEl = null;
+  };
+
+  bar.querySelector('.pwa-update-banner-apply').addEventListener('click', async () => {
+    try {
+      await applyUpdate();
+    } catch {
+      window.location.reload();
+    }
+  });
+
+  bar.querySelector('.pwa-update-banner-dismiss').addEventListener('click', remove);
+
+  document.body.appendChild(bar);
+  pwaUpdateBannerEl = bar;
 }

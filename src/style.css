@@ -353,6 +353,8 @@ textarea {
 .broadcast-wrap {
   border-radius: 16px;
   overflow: hidden;
+  overflow-x: clip;
+  max-width: 100%;
   border: 2px solid rgba(201, 162, 39, 0.45);
   box-shadow:
     0 0 30px rgba(201, 162, 39, 0.12),
@@ -420,6 +422,27 @@ textarea {
   line-height: 1;
 }
 
+@keyframes game-clock-paused {
+  0%,
+  100% {
+    opacity: 1;
+  }
+  50% {
+    opacity: 0.3;
+  }
+}
+
+.game-clock-display--paused {
+  animation: game-clock-paused 1s ease-in-out infinite;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .game-clock-display--paused {
+    animation: none;
+    opacity: 0.65;
+  }
+}
+
 .game-clock-actions {
   display: flex;
   justify-content: center;
@@ -436,16 +459,22 @@ textarea {
 
 .broadcast-scores {
   display: grid;
-  grid-template-columns: minmax(0, 1fr) auto minmax(0, 1fr);
+  grid-template-columns: minmax(0, 1fr) minmax(0, auto) minmax(0, 1fr);
   align-items: center;
-  gap: 8px;
-  padding: 18px 8px 22px;
+  gap: 6px;
+  padding: 18px 6px 22px;
   background: linear-gradient(180deg, #0c1829 0%, #060b12 100%);
+  width: 100%;
+  max-width: 100%;
+  min-width: 0;
+  box-sizing: border-box;
 }
 
 .broadcast-scores .score-mega {
   align-self: center;
   padding: 8px 0;
+  min-width: 0;
+  max-width: min(44vw, 152px);
 }
 
 .team-col {
@@ -453,13 +482,22 @@ textarea {
   flex-direction: column;
   align-items: center;
   gap: 8px;
-  padding: 0 4px;
+  padding: 0 2px;
+  min-width: 0;
+  max-width: 100%;
+  overflow: hidden;
 }
 
 .team-badge-slot {
   width: 88px;
   height: 88px;
   flex-shrink: 0;
+}
+
+.broadcast-scores .team-badge-slot {
+  width: min(88px, 26vw);
+  height: min(88px, 26vw);
+  max-width: 100%;
 }
 
 .team-badge-slot .team-badge {
@@ -520,7 +558,7 @@ textarea {
 
 .score-mega {
   font-family: var(--font-display);
-  font-size: clamp(3.2rem, 14vw, 4.5rem);
+  font-size: clamp(1.85rem, 10vw, 4.5rem);
   line-height: 0.95;
   color: #fff;
   text-align: center;
@@ -532,7 +570,7 @@ textarea {
 
 .score-sep {
   font-family: var(--font-display);
-  font-size: clamp(2rem, 8vw, 2.8rem);
+  font-size: clamp(1.35rem, 6vw, 2.8rem);
   color: var(--gold);
   padding: 0 2px;
 }
@@ -551,20 +589,26 @@ textarea {
 
 .point-grid {
   display: grid;
-  grid-template-columns: repeat(3, 1fr);
-  gap: 8px;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 6px;
   width: 100%;
-  max-width: 280px;
+  max-width: 100%;
+  min-width: 0;
   margin: 0 auto;
+  box-sizing: border-box;
 }
 
 .point-grid.soccer {
   grid-template-columns: 1fr;
-  max-width: 200px;
+  max-width: min(200px, 100%);
 }
 
 .btn-pt {
-  min-height: 52px;
+  min-height: 48px;
+  min-width: 0;
+  width: 100%;
+  padding: 8px 4px;
+  font-size: clamp(0.8rem, 3.8vw, 1rem);
   font-variant-numeric: tabular-nums;
   background: linear-gradient(180deg, #1e4976 0%, #132f4c 100%);
   border: 1px solid rgba(255, 255, 255, 0.1);
@@ -572,6 +616,7 @@ textarea {
   touch-action: manipulation;
   user-select: none;
   -webkit-user-select: none;
+  box-sizing: border-box;
 }
 
 .point-hint {
@@ -1401,6 +1446,58 @@ button.stat-box {
   color: #fff;
 }
 
+/* ——— Actualización PWA ——— */
+.pwa-update-banner {
+  position: fixed;
+  z-index: 100010;
+  left: 0;
+  right: 0;
+  bottom: 0;
+  padding: 12px 14px calc(12px + env(safe-area-inset-bottom, 0));
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 12px;
+  flex-wrap: wrap;
+  background: linear-gradient(180deg, #0f2137 0%, #060b12 100%);
+  border-top: 2px solid var(--gold);
+  box-shadow: 0 -10px 40px rgba(0, 0, 0, 0.55);
+}
+
+.pwa-update-banner-text {
+  flex: 1 1 200px;
+  font-size: 0.9rem;
+  font-weight: 600;
+  color: #e2e8f0;
+  text-align: center;
+  line-height: 1.35;
+}
+
+.pwa-update-banner .pwa-update-banner-apply {
+  flex-shrink: 0;
+  min-height: 44px;
+  padding: 0 18px;
+}
+
+.pwa-update-banner-dismiss {
+  flex-shrink: 0;
+  width: 40px;
+  height: 40px;
+  border: none;
+  border-radius: 10px;
+  background: rgba(255, 255, 255, 0.08);
+  color: var(--muted);
+  font-size: 1.35rem;
+  line-height: 1;
+  cursor: pointer;
+  font-family: inherit;
+}
+
+.pwa-update-banner-dismiss:active {
+  background: rgba(255, 255, 255, 0.14);
+  color: #fff;
+}
+
 /* ——— Modal confirmación ——— */
 .modal-backdrop {
   position: fixed;
@@ -1571,6 +1668,15 @@ button.stat-box {
 
 .settings-lead strong {
   color: #cbd5e1;
+}
+
+.settings-block--danger {
+  border-color: rgba(239, 68, 68, 0.35);
+  background: linear-gradient(180deg, rgba(127, 29, 29, 0.12) 0%, rgba(15, 33, 55, 0.85) 100%);
+}
+
+.settings-block--danger h2 {
+  color: #fca5a5;
 }
 
 .import-json-label {

@@ -38,6 +38,12 @@ export function deleteMatch(id) {
   persist(list);
 }
 
+/** Quita solo partidos finalizados (estadísticas e historial de finalizados). Mantiene programados, en vivo y equipos. */
+export function deleteFinishedMatches() {
+  const list = loadMatches().filter((m) => m.status !== 'finished');
+  persist(list);
+}
+
 export function newId() {
   if (typeof crypto !== 'undefined' && crypto.randomUUID) return crypto.randomUUID();
   return `m_${Date.now()}_${Math.random().toString(36).slice(2, 11)}`;
@@ -76,6 +82,27 @@ export function deleteSavedTeam(id) {
 
 export function getSavedTeam(id) {
   return loadSavedTeams().find((t) => t.id === id) ?? null;
+}
+
+/**
+ * Borra todos los partidos y equipos guardados en este dispositivo (localStorage).
+ * También limpia marcas auxiliares en sessionStorage. Irreversible.
+ */
+export function clearAllAppData() {
+  if (typeof localStorage === 'undefined') return;
+  try {
+    localStorage.removeItem(STORAGE_KEY);
+    localStorage.removeItem(TEAMS_KEY);
+  } catch {
+    /* ignore */
+  }
+  try {
+    if (typeof sessionStorage !== 'undefined') {
+      sessionStorage.removeItem('gamecounterHighlightUpcoming');
+    }
+  } catch {
+    /* ignore */
+  }
 }
 
 function isValidHexColor(c) {

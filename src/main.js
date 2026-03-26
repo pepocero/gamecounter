@@ -1,5 +1,5 @@
 import './style.css';
-import { registerSW } from 'virtual:pwa-register';
+import { initPwaUpdates, checkForUpdatesManually } from './pwaUpdate.js';
 import {
   loadMatches,
   saveMatch,
@@ -15,7 +15,9 @@ import {
   getSavedTeam,
   buildExportPayload,
   applyImportPayload,
-  deleteMatch
+  deleteMatch,
+  clearAllAppData,
+  deleteFinishedMatches
 } from './storage.js';
 import {
   buildShareText,
@@ -44,7 +46,7 @@ function whatsAppTextUrl(text) {
   return `https://wa.me/?text=${q}`;
 }
 
-registerSW({ immediate: true });
+initPwaUpdates();
 
 function escapeHtml(s) {
   const d = document.createElement('div');
@@ -262,7 +264,7 @@ function viewHome() {
       <p class="eyebrow">LIVE SCOREBOARD</p>
       <div class="logo-line" aria-hidden="true"></div>
     </div>
-    <h1>Marcador de partidos</h1>
+    <h1>GameScore</h1>
     <p class="msg">Estilo transmisión oficial: fútbol o baloncesto. Tus datos solo en este dispositivo.</p>
     ${upcomingBanner}
     <div class="stack">
@@ -689,11 +691,15 @@ function bindScoreButtons(app, m) {
       const cur = getMatch(m.id);
       if (!cur || cur.status !== 'live') return;
       cur.clock = ensureClock(cur.clock);
-      const roster = team === 'A' ? cur.rosterA || [] : cur.rosterB || [];
+      const rosterRaw = team === 'A' ? cur.rosterA || [] : cur.rosterB || [];
+      const roster = Array.isArray(rosterRaw)
+        ? rosterRaw.map((p) => ({ id: p.id, name: p.name }))
+        : [];
       addBusy = true;
       let pick = { playerId: null, playerName: null };
       if (roster.length > 0) {
         const teamLabel = team === 'A' ? cur.teamA : cur.teamB;
+        await new Promise((r) => requestAnimationFrame(() => r()));
         const r = await showPlayerPicker({
           players: roster,
           title: `¿Quién anotó? (${teamLabel})`
@@ -754,6 +760,11 @@ function bindScoreButtons(app, m) {
 
     btn.addEventListener('pointerup', (e) => {
       if (e.button !== 0 && e.pointerType === 'mouse') return;
+      try {
+        btn.releasePointerCapture(e.pointerId);
+      } catch {
+        /* no captura activa */
+      }
       clearTimer();
       if (longPressFired) {
         longPressFired = false;
@@ -763,7 +774,14 @@ function bindScoreButtons(app, m) {
       void applyAdd();
     });
 
-    btn.addEventListener('pointercancel', clearTimer);
+    btn.addEventListener('pointercancel', (e) => {
+      try {
+        btn.releasePointerCapture(e.pointerId);
+      } catch {
+        /* ignore */
+      }
+      clearTimer();
+    });
 
     btn.addEventListener('keydown', (e) => {
       if (e.key !== 'Enter' && e.key !== ' ') return;
@@ -791,10 +809,11 @@ function bindLive(m) {
     else cur.clock = ensureClock(cur.clock);
     const ms = getElapsedMs(cur.clock);
     display.textContent = formatClockMs(ms);
-    if (!btnStart || !btnPause || !btnResume) return;
     const running = isClockRunning(cur.clock);
     const atZeroStopped = isClockAtZeroStopped(cur.clock);
     const pausedWithTime = !running && !atZeroStopped;
+    display.classList.toggle('game-clock-display--paused', pausedWithTime);
+    if (!btnStart || !btnPause || !btnResume) return;
     btnStart.hidden = !atZeroStopped;
     btnPause.hidden = !running;
     btnResume.hidden = !pausedWithTime;
@@ -1080,12 +1099,43 @@ function viewHistory() {
     </div>
     <h1>Historial</h1>
     <div class="stack">${rows}</div>
+    <div class="card settings-block settings-block--danger" style="margin-top: 16px;">
+      <h2>Borrar partidos finalizados</h2>
+      <p class="settings-lead">Elimina solo los partidos <strong>finalizados</strong> de este listado y las estadísticas asociadas. No se borran partidos programados, el partido en vivo ni los equipos guardados.</p>
+      <button type="button" class="btn btn-danger btn-block" data-clear-history-finished>Eliminar solo finalizados del historial</button>
+    </div>
   `;
 }
 
 function bindHistory() {
   const app = document.getElementById('app');
   app.querySelector('[data-back]').onclick = () => navigate('home');
+
+  const btnClearFinished = app.querySelector('[data-clear-history-finished]');
+  if (btnClearFinished) {
+    btnClearFinished.onclick = async (e) => {
+      e.stopPropagation();
+      const finished = loadMatches().filter((m) => m.status === 'finished');
+      if (finished.length === 0) {
+        showToast('No hay partidos finalizados que borrar.', { variant: 'error' });
+        return;
+      }
+      const n = finished.length;
+      const ok = await showConfirm(
+        `Se eliminarán ${n} partido${n === 1 ? '' : 's'} finalizado${n === 1 ? '' : 's'}. Desaparecerán del historial y de las estadísticas. Los partidos programados, en curso y los equipos guardados no se tocan.`,
+        {
+          title: '¿Eliminar finalizados del historial?',
+          confirmText: 'Eliminar finalizados',
+          cancelText: 'Cancelar',
+          danger: true
+        }
+      );
+      if (!ok) return;
+      deleteFinishedMatches();
+      showToast('Partidos finalizados eliminados.', { variant: 'success' });
+      render();
+    };
+  }
 
   app.querySelectorAll('[data-history-badge]').forEach((el) => {
     const id = el.getAttribute('data-mid');
@@ -1266,6 +1316,11 @@ function viewStats() {
       <h2>Victorias por nombre de equipo</h2>
       ${wins ? `<ul style="margin:0; padding-left: 1.2rem;">${wins}</ul>` : '<p style="color:var(--muted); margin:0;">Sin datos aún.</p>'}
     </div>
+    <div class="card settings-block settings-block--danger" style="margin-top: 16px;">
+      <h2>Vaciar estadísticas</h2>
+      <p class="settings-lead">Borra solo los partidos <strong>finalizados</strong> (cuentas, victorias y listas de detalle). No se borran partidos programados, el partido en vivo ni los equipos guardados en Configuración.</p>
+      <button type="button" class="btn btn-danger btn-block" data-clear-stats>Eliminar solo estadísticas</button>
+    </div>
   `;
 }
 
@@ -1278,6 +1333,28 @@ function bindStats() {
       if (sport === 'soccer' || sport === 'basketball') navigate('stats', sport);
     });
   });
+
+  app.querySelector('[data-clear-stats]').onclick = async () => {
+    const finished = loadMatches().filter((m) => m.status === 'finished');
+    if (finished.length === 0) {
+      showToast('No hay partidos finalizados que borrar.', { variant: 'error' });
+      return;
+    }
+    const n = finished.length;
+    const ok = await showConfirm(
+      `Se eliminarán ${n} partido${n === 1 ? '' : 's'} finalizado${n === 1 ? '' : 's'}. Las estadísticas y el historial de finalizados quedarán vacíos. Los partidos programados, en curso y los equipos guardados no se tocan.`,
+      {
+        title: '¿Eliminar solo estadísticas?',
+        confirmText: 'Eliminar finalizados',
+        cancelText: 'Cancelar',
+        danger: true
+      }
+    );
+    if (!ok) return;
+    deleteFinishedMatches();
+    showToast('Partidos finalizados eliminados.', { variant: 'success' });
+    render();
+  };
 }
 
 function finishedMatchesBySport(sport) {
@@ -1371,6 +1448,11 @@ function viewSettings() {
         <button type="button" class="btn btn-primary btn-block" data-go-teams>Gestionar equipos</button>
       </div>
       <div class="card settings-block">
+        <h2>Actualización de la app</h2>
+        <p class="settings-lead">Si instalaste GameScore en la pantalla de inicio, el sistema comprueba novedades al volver a la app. También puedes forzar la comprobación aquí.</p>
+        <button type="button" class="btn btn-primary btn-block" data-check-pwa-update>Buscar actualizaciones</button>
+      </div>
+      <div class="card settings-block">
         <h2>Copia de seguridad (JSON)</h2>
         <p class="settings-lead">Exporta o importa <strong>partidos</strong>, <strong>equipos guardados</strong> e imágenes (Base64 en el archivo). Al importar, solo se <strong>añaden</strong> entradas nuevas (por ID); no se borra nada ni se mezclan equipos ya existentes.</p>
         <button type="button" class="btn btn-primary btn-block" data-export-json>Exportar todo</button>
@@ -1378,6 +1460,11 @@ function viewSettings() {
           Importar JSON
           <input type="file" id="import-json-input" accept=".json,application/json" />
         </label>
+      </div>
+      <div class="card settings-block settings-block--danger">
+        <h2>Restablecer aplicación</h2>
+        <p class="settings-lead">Elimina todos los partidos y equipos guardados en este dispositivo. No se puede deshacer.</p>
+        <button type="button" class="btn btn-danger btn-block" data-reset-all>Borrar todos los datos</button>
       </div>
     </div>
   `;
@@ -1387,6 +1474,10 @@ function bindSettings() {
   const app = document.getElementById('app');
   app.querySelector('[data-back]').onclick = () => navigate('home');
   app.querySelector('[data-go-teams]').onclick = () => navigate('teams');
+
+  app.querySelector('[data-check-pwa-update]').onclick = () => {
+    void checkForUpdatesManually();
+  };
 
   app.querySelector('[data-export-json]').onclick = () => {
     try {
@@ -1442,6 +1533,22 @@ function bindSettings() {
       showToast(err.message || 'Archivo no válido', { variant: 'error' });
     }
   });
+
+  app.querySelector('[data-reset-all]').onclick = async () => {
+    const ok = await showConfirm(
+      'Se borrarán todos los partidos (programados, en curso y finalizados) y todos los equipos guardados. Esta acción no se puede deshacer.',
+      {
+        title: '¿Borrar todos los datos?',
+        confirmText: 'Sí, borrar todo',
+        cancelText: 'Cancelar',
+        danger: true
+      }
+    );
+    if (!ok) return;
+    clearAllAppData();
+    showToast('Datos eliminados. La aplicación está en blanco.', { variant: 'success' });
+    navigate('home');
+  };
 }
 
 function viewTeams() {

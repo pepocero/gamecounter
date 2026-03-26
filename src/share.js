@@ -39,7 +39,7 @@ export function buildShareText(match) {
   if (timeline.length) {
     body += `\nCronología:\n${timeline.join('\n')}\n`;
   }
-  body += `\n— Marcador de partidos`;
+  body += `\n— GameScore`;
   return body;
 }
 
@@ -170,7 +170,7 @@ export async function renderMatchSummaryImage(match) {
 
   ctx.fillStyle = '#64748b';
   ctx.font = '26px system-ui, sans-serif';
-  ctx.fillText('Marcador de partidos · resultado oficial', w / 2, h - 80);
+  ctx.fillText('GameScore · resultado oficial', w / 2, h - 80);
 
   return new Promise((resolve, reject) => {
     canvas.toBlob(

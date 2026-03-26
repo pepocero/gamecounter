@@ -100,7 +100,7 @@ function validateMatchRaw(m) {
   if (m.sport !== 'soccer' && m.sport !== 'basketball') return false;
   if (typeof m.teamA !== 'string' || typeof m.teamB !== 'string') return false;
   if (!Array.isArray(m.events)) return false;
-  if (m.status !== 'live' && m.status !== 'finished') return false;
+  if (m.status !== 'live' && m.status !== 'finished' && m.status !== 'scheduled') return false;
   return true;
 }
 

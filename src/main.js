@@ -14,7 +14,8 @@ import {
   deleteSavedTeam,
   getSavedTeam,
   buildExportPayload,
-  applyImportPayload
+  applyImportPayload,
+  deleteMatch
 } from './storage.js';
 import {
   buildShareText,
@@ -88,7 +89,8 @@ function setPageClass(name) {
     history: 'page-history',
     stats: 'page-stats',
     settings: 'page-settings',
-    teams: 'page-teams'
+    teams: 'page-teams',
+    upcoming: 'page-upcoming'
   };
   app.className = map[name] || 'page-home';
 }
@@ -200,10 +202,30 @@ function render() {
     bindTeams();
     return;
   }
+  if (name === 'upcoming') {
+    setPageClass('upcoming');
+    app.innerHTML = viewUpcoming();
+    bindUpcoming();
+    return;
+  }
   navigate('home');
 }
 
 function viewHome() {
+  const scheduledCount = loadMatches().filter((m) => m.status === 'scheduled').length;
+  const upcomingBanner =
+    scheduledCount > 0
+      ? `
+    <button type="button" class="home-upcoming-banner" data-act="upcoming">
+      <span class="home-upcoming-count" aria-hidden="true">${scheduledCount}</span>
+      <span class="home-upcoming-copy">
+        <strong>${scheduledCount === 1 ? 'Partido programado' : 'Partidos programados'}</strong>
+        <small>${scheduledCount === 1 ? 'Toca para abrir y comenzar cuando llegue el momento' : 'Toca para ver la lista e iniciar el marcador'}</small>
+      </span>
+      <span class="home-upcoming-chevron" aria-hidden="true">›</span>
+    </button>`
+      : '';
+
   return `
     <div class="hero-brand">
       <p class="eyebrow">LIVE SCOREBOARD</p>
@@ -211,8 +233,10 @@ function viewHome() {
     </div>
     <h1>Marcador de partidos</h1>
     <p class="msg">Estilo transmisión oficial: fútbol o baloncesto. Tus datos solo en este dispositivo.</p>
+    ${upcomingBanner}
     <div class="stack">
       <button type="button" class="btn btn-primary btn-block" data-act="new">Nuevo partido</button>
+      <button type="button" class="btn btn-block" data-act="upcoming">Próximos partidos</button>
       <button type="button" class="btn btn-block" data-act="history">Historial</button>
       <button type="button" class="btn btn-block" data-act="stats">Estadísticas</button>
       <button type="button" class="btn btn-block" data-act="settings">Configuración</button>
@@ -226,6 +250,7 @@ function bindHome() {
     if (!b) return;
     const act = b.getAttribute('data-act');
     if (act === 'new') navigate('new');
+    if (act === 'upcoming') navigate('upcoming');
     if (act === 'history') navigate('history');
     if (act === 'stats') navigate('stats');
     if (act === 'settings') navigate('settings');
@@ -318,7 +343,11 @@ function viewNew() {
           <input id="place" name="place" maxlength="120" autocomplete="off" placeholder="Arena, cancha, ciudad…" />
         </div>
       </div>
-      <button type="submit" class="btn btn-primary btn-block">Comenzar partido</button>
+      <p class="msg new-match-hint">Programa el partido para otro día o empieza el marcador ya.</p>
+      <div class="stack new-match-actions">
+        <button type="submit" name="formAction" value="schedule" class="btn btn-primary btn-block">Programar partido</button>
+        <button type="submit" name="formAction" value="live" class="btn btn-block">Comenzar partido ahora</button>
+      </div>
     </form>
   `;
 }
@@ -422,6 +451,8 @@ function bindNew() {
   app.querySelector('#form-new').onsubmit = (e) => {
     e.preventDefault();
     const fd = new FormData(e.target);
+    const formAction = String(fd.get('formAction') || 'live');
+    const schedule = formAction === 'schedule';
     const sport = fd.get('sport');
     const teamA = String(fd.get('teamA') || '').trim();
     const teamB = String(fd.get('teamB') || '').trim();
@@ -433,6 +464,7 @@ function bindNew() {
     if (!/^#[0-9A-Fa-f]{6}$/.test(teamBColor)) teamBColor = DEFAULT_COLOR_B;
     if (!teamA || !teamB || !date) return;
 
+    const now = Date.now();
     const match = {
       id: newId(),
       sport,
@@ -445,12 +477,18 @@ function bindNew() {
       date,
       place,
       events: [],
-      status: 'live',
-      startedAt: Date.now(),
-      endedAt: null
+      status: schedule ? 'scheduled' : 'live',
+      startedAt: schedule ? null : now,
+      endedAt: null,
+      createdAt: now
     };
     saveMatch(match);
-    navigate('live', match.id);
+    if (schedule) {
+      showToast('Partido guardado en Próximos partidos.', { variant: 'success' });
+      navigate('upcoming');
+    } else {
+      navigate('live', match.id);
+    }
   };
 }
 
@@ -744,7 +782,9 @@ function bindShare(m) {
 }
 
 function viewHistory() {
-  const matches = loadMatches().sort((a, b) => (b.endedAt || b.startedAt) - (a.endedAt || a.startedAt));
+  const matches = loadMatches()
+    .filter((m) => m.status !== 'scheduled')
+    .sort((a, b) => (b.endedAt || b.startedAt) - (a.endedAt || a.startedAt));
   if (matches.length === 0) {
     return `
       <div class="topbar">
@@ -800,6 +840,111 @@ function bindHistory() {
     if (m.status === 'live') navigate('live', id);
     else navigate('share', id);
   };
+}
+
+function upcomingMatchesSorted() {
+  return loadMatches()
+    .filter((m) => m.status === 'scheduled')
+    .sort((a, b) => {
+      const da = a.date || '';
+      const db = b.date || '';
+      if (da !== db) return da.localeCompare(db);
+      return (a.createdAt || 0) - (b.createdAt || 0);
+    });
+}
+
+function viewUpcoming() {
+  const list = upcomingMatchesSorted();
+  if (list.length === 0) {
+    return `
+      <div class="topbar">
+        <button type="button" class="btn btn-ghost back" data-back>← Inicio</button>
+      </div>
+      <h1>Próximos partidos</h1>
+      <p class="msg">No hay partidos programados. En <strong>Nuevo partido</strong> elige <strong>Programar partido</strong> para guardar equipos, fecha y lugar; aquí podrás iniciar el marcador cuando llegue el momento.</p>
+      <button type="button" class="btn btn-primary btn-block" data-go-new>Nuevo partido</button>
+    `;
+  }
+  const rows = list
+    .map((m) => {
+      const sp = m.sport === 'soccer' ? 'Fútbol' : 'Baloncesto';
+      return `
+        <div class="card upcoming-card">
+          <div class="upcoming-card__head">
+            <span class="upcoming-badge">Programado</span>
+            <span class="upcoming-date">${escapeHtml(m.date)}</span>
+          </div>
+          <p class="upcoming-place">${escapeHtml(m.place || 'Sin lugar')}</p>
+          <div class="upcoming-teams">
+            <div class="upcoming-team">
+              <div class="team-badge-slot" data-up-badge="A" data-up-mid="${String(m.id).replace(/"/g, '')}" style="width:52px;height:52px;"></div>
+              <span>${escapeHtml(m.teamA)}</span>
+            </div>
+            <span class="upcoming-vs">vs</span>
+            <div class="upcoming-team">
+              <div class="team-badge-slot" data-up-badge="B" data-up-mid="${String(m.id).replace(/"/g, '')}" style="width:52px;height:52px;"></div>
+              <span>${escapeHtml(m.teamB)}</span>
+            </div>
+          </div>
+          <p class="upcoming-sport">${escapeHtml(sp)}</p>
+          <div class="upcoming-actions">
+            <button type="button" class="btn btn-primary btn-block" data-start-match="${escapeHtml(m.id)}">Comenzar partido</button>
+            <button type="button" class="btn btn-ghost btn-block" data-delete-upcoming="${escapeHtml(m.id)}">Eliminar programación</button>
+          </div>
+        </div>`;
+    })
+    .join('');
+  return `
+    <div class="topbar">
+      <button type="button" class="btn btn-ghost back" data-back>← Inicio</button>
+    </div>
+    <h1>Próximos partidos</h1>
+    <p class="msg">Toca <strong>Comenzar partido</strong> cuando estés en la cancha para abrir el marcador en vivo.</p>
+    <div class="stack upcoming-list">${rows}</div>
+  `;
+}
+
+function bindUpcoming() {
+  const app = document.getElementById('app');
+  app.querySelector('[data-back]')?.addEventListener('click', () => navigate('home'));
+  app.querySelector('[data-go-new]')?.addEventListener('click', () => navigate('new'));
+
+  upcomingMatchesSorted().forEach((m) => {
+    ['A', 'B'].forEach((side) => {
+      const slot = app.querySelector(`[data-up-badge="${side}"][data-up-mid="${m.id}"]`);
+      if (slot) attachTeamBadgeSlot(slot, m, side);
+    });
+  });
+
+  app.querySelectorAll('[data-start-match]').forEach((btn) => {
+    btn.addEventListener('click', () => {
+      const id = btn.getAttribute('data-start-match');
+      const cur = getMatch(id);
+      if (!cur || cur.status !== 'scheduled') return;
+      cur.status = 'live';
+      cur.startedAt = Date.now();
+      saveMatch(cur);
+      navigate('live', id);
+    });
+  });
+
+  app.querySelectorAll('[data-delete-upcoming]').forEach((btn) => {
+    btn.addEventListener('click', async () => {
+      const id = btn.getAttribute('data-delete-upcoming');
+      const cur = getMatch(id);
+      if (!cur || cur.status !== 'scheduled') return;
+      const ok = await showConfirm('Se eliminará este partido programado (no afecta a partidos ya jugados).', {
+        title: '¿Eliminar programación?',
+        confirmText: 'Eliminar',
+        cancelText: 'Cancelar',
+        danger: true
+      });
+      if (!ok) return;
+      deleteMatch(id);
+      showToast('Programación eliminada', { variant: 'success' });
+      render();
+    });
+  });
 }
 
 function viewStats() {

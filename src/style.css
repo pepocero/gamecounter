@@ -849,6 +849,92 @@ button.stat-box {
   max-width: 520px;
 }
 
+.home-upcoming-banner {
+  display: flex;
+  align-items: center;
+  gap: 14px;
+  width: 100%;
+  margin: 0 0 16px;
+  padding: 14px 16px;
+  text-align: left;
+  cursor: pointer;
+  font-family: inherit;
+  color: inherit;
+  border: 1px solid rgba(201, 162, 39, 0.45);
+  border-radius: var(--radius);
+  background: linear-gradient(135deg, rgba(201, 162, 39, 0.18) 0%, rgba(19, 47, 76, 0.85) 55%, rgba(10, 22, 40, 0.95) 100%);
+  box-shadow:
+    0 0 0 1px rgba(0, 0, 0, 0.35),
+    0 8px 28px rgba(0, 0, 0, 0.35);
+  transition:
+    transform 0.12s ease,
+    border-color 0.15s ease;
+}
+
+.home-upcoming-banner:active {
+  transform: scale(0.99);
+}
+
+.home-upcoming-count {
+  flex-shrink: 0;
+  min-width: 48px;
+  height: 48px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  border-radius: 12px;
+  font-family: var(--font-display);
+  font-size: 1.75rem;
+  line-height: 1;
+  color: #0a1628;
+  background: linear-gradient(145deg, #eab308 0%, var(--gold) 45%, #a16207 100%);
+  box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.35);
+  animation: home-upcoming-pulse 2.5s ease-in-out infinite;
+}
+
+.home-upcoming-copy {
+  flex: 1;
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+
+.home-upcoming-copy strong {
+  font-size: 0.95rem;
+  font-weight: 800;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+  color: #fefce8;
+}
+
+.home-upcoming-copy small {
+  font-size: 0.8rem;
+  font-weight: 500;
+  color: var(--muted);
+  line-height: 1.35;
+}
+
+.home-upcoming-chevron {
+  flex-shrink: 0;
+  font-size: 1.5rem;
+  font-weight: 300;
+  color: var(--gold);
+  opacity: 0.85;
+}
+
+@keyframes home-upcoming-pulse {
+  0%,
+  100% {
+    box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.35);
+  }
+  50% {
+    box-shadow:
+      inset 0 1px 0 rgba(255, 255, 255, 0.45),
+      0 0 18px rgba(234, 179, 8, 0.35);
+  }
+}
+
 .home-hero {
   position: relative;
   margin: calc(-4px - var(--safe-top)) -14px 20px;
@@ -1284,6 +1370,9 @@ button.stat-box {
   .home-hero__ticker-live {
     animation: none;
   }
+  .home-upcoming-count {
+    animation: none;
+  }
   .toast {
     transition: none;
   }
@@ -1389,4 +1478,99 @@ button.stat-box {
   min-height: 40px;
   padding: 0 12px;
   font-size: 0.88rem;
+}
+
+/* ——— Nuevo partido: dos acciones ——— */
+.new-match-hint {
+  margin: 0 0 4px;
+  font-size: 0.88rem;
+}
+
+.new-match-actions {
+  gap: 10px;
+}
+
+/* ——— Próximos partidos ——— */
+.upcoming-list {
+  gap: 14px;
+}
+
+.upcoming-card {
+  border: 1px solid rgba(201, 162, 39, 0.28);
+}
+
+.upcoming-card__head {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  gap: 10px;
+  margin-bottom: 8px;
+}
+
+.upcoming-badge {
+  font-size: 0.65rem;
+  font-weight: 800;
+  letter-spacing: 0.18em;
+  text-transform: uppercase;
+  color: var(--gold);
+  padding: 4px 10px;
+  border-radius: 6px;
+  background: rgba(201, 162, 39, 0.12);
+  border: 1px solid rgba(201, 162, 39, 0.35);
+}
+
+.upcoming-date {
+  font-weight: 700;
+  color: #e2e8f0;
+  font-size: 0.95rem;
+}
+
+.upcoming-place {
+  margin: 0 0 14px;
+  font-size: 0.88rem;
+  color: var(--muted);
+}
+
+.upcoming-teams {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+  margin-bottom: 10px;
+  flex-wrap: wrap;
+}
+
+.upcoming-team {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 6px;
+  flex: 1;
+  min-width: 0;
+  text-align: center;
+  font-size: 0.85rem;
+  font-weight: 700;
+  text-transform: uppercase;
+  letter-spacing: 0.03em;
+}
+
+.upcoming-vs {
+  flex-shrink: 0;
+  color: var(--muted);
+  font-size: 0.8rem;
+  font-weight: 700;
+}
+
+.upcoming-sport {
+  margin: 0 0 14px;
+  font-size: 0.78rem;
+  letter-spacing: 0.12em;
+  text-transform: uppercase;
+  color: var(--muted);
+}
+
+.upcoming-actions {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
 }

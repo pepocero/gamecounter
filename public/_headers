@@ -1,0 +1,12 @@
+# Evita que CDN/navegador sirvan un service worker antiguo (la PWA instalada no se actualiza).
+# Cloudflare Pages, Netlify y otros copian este archivo a la raíz del sitio.
+# Si usas otro hosting, configura lo mismo en su panel (Cache-Control para /sw.js e index.html).
+
+/sw.js
+  Cache-Control: no-cache, no-store, must-revalidate
+
+/index.html
+  Cache-Control: no-cache, must-revalidate
+
+/manifest.webmanifest
+  Cache-Control: no-cache, must-revalidate

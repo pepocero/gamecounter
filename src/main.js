@@ -1,5 +1,5 @@
 import './style.css';
-import { initPwaUpdates, checkForUpdatesManually } from './pwaUpdate.js';
+import { initPwaUpdates, checkForUpdatesManually, forceReloadLatestVersion } from './pwaUpdate.js';
 import {
   loadMatches,
   saveMatch,
@@ -1449,8 +1449,9 @@ function viewSettings() {
       </div>
       <div class="card settings-block">
         <h2>Actualización de la app</h2>
-        <p class="settings-lead">Si instalaste GameScore en la pantalla de inicio, el sistema comprueba novedades al volver a la app. También puedes forzar la comprobación aquí.</p>
+        <p class="settings-lead">En la app instalada, el gesto de “estirar para actualizar” a veces <strong>no</strong> descarga la última versión. Usa <strong>Buscar actualizaciones</strong> o, si sigues viendo la versión antigua, <strong>Cargar última versión</strong> (limpia solo la caché de la app; tus partidos no se borran).</p>
         <button type="button" class="btn btn-primary btn-block" data-check-pwa-update>Buscar actualizaciones</button>
+        <button type="button" class="btn btn-block" data-pwa-force-reload>Cargar última versión</button>
       </div>
       <div class="card settings-block">
         <h2>Copia de seguridad (JSON)</h2>
@@ -1477,6 +1478,20 @@ function bindSettings() {
 
   app.querySelector('[data-check-pwa-update]').onclick = () => {
     void checkForUpdatesManually();
+  };
+
+  app.querySelector('[data-pwa-force-reload]').onclick = async () => {
+    const ok = await showConfirm(
+      'Se cerrará la caché de la aplicación instalada y la página se recargará para descargar la última versión desde el servidor. Tus datos en este dispositivo (partidos y equipos) no se borran.',
+      {
+        title: '¿Cargar la última versión?',
+        confirmText: 'Sí, recargar',
+        cancelText: 'Cancelar',
+        danger: false
+      }
+    );
+    if (!ok) return;
+    await forceReloadLatestVersion();
   };
 
   app.querySelector('[data-export-json]').onclick = () => {

@@ -25,8 +25,14 @@ import {
   shareMatch,
   downloadImageBlob
 } from './share.js';
-import { teamColor, teamImage, teamInitial, DEFAULT_COLOR_A, DEFAULT_COLOR_B } from './teamVisual.js';
+import { teamColor, teamImage, teamInitial, teamAudio, DEFAULT_COLOR_A, DEFAULT_COLOR_B } from './teamVisual.js';
 import { fileToResizedJpegDataUrl, isSafeDataImageUrl } from './imageUtils.js';
+import {
+  stopTeamChant,
+  toggleTeamChant,
+  isSafeTeamAudioDataUrl,
+  fileToAudioDataUrl
+} from './audioUtils.js';
 import { showToast, showConfirm, showPlayerPicker } from './dialogs.js';
 import {
   createInitialClock,
@@ -128,12 +134,26 @@ function setPageClass(name) {
   app.className = map[name] || 'page-home';
 }
 
-function attachTeamBadgeSlot(slot, match, side) {
+function attachTeamBadgeSlot(slot, match, side, opts) {
   if (!slot) return;
+  const live = opts && opts.live;
   const color = teamColor(match, side);
   const url = teamImage(match, side);
   const name = side === 'A' ? match.teamA : match.teamB;
+  const chantUrl = teamAudio(match, side);
   slot.innerHTML = '';
+  if (live && chantUrl) {
+    slot.classList.add('team-badge-slot--audio');
+    slot.setAttribute('role', 'button');
+    slot.setAttribute('tabindex', '0');
+    const labelSide = side === 'A' ? 'equipo local' : 'equipo visitante';
+    slot.setAttribute('aria-label', `Reproducir o parar cántico (${labelSide})`);
+  } else {
+    slot.classList.remove('team-badge-slot--audio');
+    slot.removeAttribute('role');
+    slot.removeAttribute('tabindex');
+    slot.removeAttribute('aria-label');
+  }
   if (url && isSafeDataImageUrl(url)) {
     const wrap = document.createElement('div');
     wrap.className = 'team-badge';
@@ -154,14 +174,15 @@ function attachTeamBadgeSlot(slot, match, side) {
   }
 }
 
-function attachTeamBadges(match) {
+function attachTeamBadges(match, opts) {
   document.querySelectorAll('[data-team-badge]').forEach((slot) => {
     const side = slot.getAttribute('data-team-badge');
-    if (side === 'A' || side === 'B') attachTeamBadgeSlot(slot, match, side);
+    if (side === 'A' || side === 'B') attachTeamBadgeSlot(slot, match, side, opts);
   });
 }
 
 function render() {
+  stopTeamChant();
   const { name, id } = parseRoute();
   const app = document.getElementById('app');
   if (!app) return;
@@ -186,7 +207,7 @@ function render() {
     }
     setPageClass('live');
     app.innerHTML = viewLive(m);
-    attachTeamBadges(m);
+    attachTeamBadges(m, { live: true });
     bindLive(m);
     return;
   }
@@ -397,7 +418,7 @@ function viewNew() {
 
 function bindNew() {
   const app = document.getElementById('app');
-  const pending = { teamAImage: null, teamBImage: null };
+  const pending = { teamAImage: null, teamBImage: null, teamAAudio: null, teamBAudio: null };
 
   function getPreviewMatch() {
     return {
@@ -427,12 +448,14 @@ function bindNew() {
       app.querySelector('#teamA').value = t.name;
       app.querySelector('#teamAColor').value = t.color;
       pending.teamAImage = t.image && isSafeDataImageUrl(t.image) ? t.image : null;
+      pending.teamAAudio = t.audio && isSafeTeamAudioDataUrl(t.audio) ? t.audio : null;
       app.querySelector('#fileTeamA').value = '';
       app.querySelector('#rosterALines').value = rosterLines;
     } else {
       app.querySelector('#teamB').value = t.name;
       app.querySelector('#teamBColor').value = t.color;
       pending.teamBImage = t.image && isSafeDataImageUrl(t.image) ? t.image : null;
+      pending.teamBAudio = t.audio && isSafeTeamAudioDataUrl(t.audio) ? t.audio : null;
       app.querySelector('#fileTeamB').value = '';
       app.querySelector('#rosterBLines').value = rosterLines;
     }
@@ -443,10 +466,12 @@ function bindNew() {
   app.querySelector('#savedPickA').addEventListener('change', (e) => {
     const v = e.target.value;
     if (v) applySavedTeam('A', v);
+    else pending.teamAAudio = null;
   });
   app.querySelector('#savedPickB').addEventListener('change', (e) => {
     const v = e.target.value;
     if (v) applySavedTeam('B', v);
+    else pending.teamBAudio = null;
   });
 
   app.querySelector('#fileTeamA').onchange = async (e) => {
@@ -533,6 +558,8 @@ function bindNew() {
       teamBColor,
       teamAImage: pending.teamAImage && isSafeDataImageUrl(pending.teamAImage) ? pending.teamAImage : null,
       teamBImage: pending.teamBImage && isSafeDataImageUrl(pending.teamBImage) ? pending.teamBImage : null,
+      teamAAudio: pending.teamAAudio && isSafeTeamAudioDataUrl(pending.teamAAudio) ? pending.teamAAudio : null,
+      teamBAudio: pending.teamBAudio && isSafeTeamAudioDataUrl(pending.teamBAudio) ? pending.teamBAudio : null,
       date,
       place,
       rosterA,
@@ -615,6 +642,11 @@ function viewLive(m) {
         <span>${sportLabel}</span>
       </div>
       <div class="broadcast-meta">${escapeHtml(formatDateES(m.date))} · ${escapeHtml(m.place || '—')}</div>
+      ${
+        teamAudio(m, 'A') || teamAudio(m, 'B')
+          ? '<p class="live-chant-hint">Toca el escudo para el cántico (un equipo a la vez).</p>'
+          : ''
+      }
       <div class="game-clock-bar">
         <div class="game-clock-row">
           <span class="game-clock-label">Tiempo de juego</span>
@@ -672,7 +704,7 @@ function refreshLiveView(app, matchId) {
   const cur = getMatch(matchId);
   if (!cur || cur.status !== 'live') return;
   app.innerHTML = viewLive(cur);
-  attachTeamBadges(cur);
+  attachTeamBadges(cur, { live: true });
   bindLive(cur);
 }
 
@@ -870,6 +902,29 @@ function bindLive(m) {
       logToggle.setAttribute('aria-expanded', logPanel.hidden ? 'false' : 'true');
     });
   }
+
+  app.querySelectorAll('[data-team-badge]').forEach((slot) => {
+    const side = slot.getAttribute('data-team-badge');
+    if (side !== 'A' && side !== 'B') return;
+    slot.addEventListener('click', (e) => {
+      const cur = getMatch(m.id);
+      if (!cur) return;
+      const url = teamAudio(cur, side);
+      if (!url) return;
+      e.preventDefault();
+      e.stopPropagation();
+      toggleTeamChant(side, url);
+    });
+    slot.addEventListener('keydown', (e) => {
+      if (e.key !== 'Enter' && e.key !== ' ') return;
+      const cur = getMatch(m.id);
+      if (!cur) return;
+      const url = teamAudio(cur, side);
+      if (!url) return;
+      e.preventDefault();
+      toggleTeamChant(side, url);
+    });
+  });
 
   if (btnReset) {
     btnReset.onclick = async () => {
@@ -1450,8 +1505,10 @@ function viewSettings() {
       <div class="card settings-block">
         <h2>Actualización de la app</h2>
         <p class="settings-lead">En la app instalada, el gesto de “estirar para actualizar” a veces <strong>no</strong> descarga la última versión. Usa <strong>Buscar actualizaciones</strong> o, si sigues viendo la versión antigua, <strong>Cargar última versión</strong> (limpia solo la caché de la app; tus partidos no se borran).</p>
-        <button type="button" class="btn btn-primary btn-block" data-check-pwa-update>Buscar actualizaciones</button>
-        <button type="button" class="btn btn-block" data-pwa-force-reload>Cargar última versión</button>
+        <div class="settings-pwa-actions">
+          <button type="button" class="btn btn-primary btn-block" data-check-pwa-update>Buscar actualizaciones</button>
+          <button type="button" class="btn btn-block" data-pwa-force-reload>Cargar última versión</button>
+        </div>
       </div>
       <div class="card settings-block">
         <h2>Copia de seguridad (JSON)</h2>
@@ -1592,7 +1649,7 @@ function viewTeams() {
       <button type="button" class="btn btn-ghost back" data-back-settings>← Configuración</button>
     </div>
     <h1>Equipos guardados</h1>
-    <p class="msg">Estos equipos aparecen al crear un partido. Puedes guardar la plantilla de jugadores para asignar cada tanto en vivo. Las imágenes se incluyen en exportación JSON.</p>
+    <p class="msg">Estos equipos aparecen al crear un partido. Puedes guardar la plantilla de jugadores para asignar cada tanto en vivo. Las imágenes y el cántico (audio) se incluyen en exportación JSON.</p>
     <form class="card team-lib-form" id="form-team-lib">
       <input type="hidden" id="teamLibEditId" value="" />
       <h2 id="teamLibFormTitle">Nuevo equipo</h2>
@@ -1616,6 +1673,15 @@ function viewTeams() {
         <div class="team-badge-slot" style="width:72px;height:72px;" id="teamLibPreviewSlot"></div>
         <button type="button" class="btn btn-ghost" id="teamLibClearImg" style="min-height:44px;">Quitar imagen</button>
       </div>
+      <div style="margin-top:12px;">
+        <label for="teamLibAudioFile">Cántico o himno (opcional)</label>
+        <input type="file" id="teamLibAudioFile" accept="audio/*" />
+        <p class="preview-hint">MP3, OGG, WAV… Se guarda solo en este dispositivo. En el marcador en vivo, toca el escudo para reproducir (un equipo a la vez).</p>
+      </div>
+      <div class="preview-row team-lib-audio-row">
+        <span id="teamLibAudioStatus" class="team-lib-audio-status" aria-live="polite"></span>
+        <button type="button" class="btn btn-ghost" id="teamLibClearAudio" style="min-height:44px;">Quitar audio</button>
+      </div>
       <div class="team-lib-form-actions">
         <button type="submit" class="btn btn-primary" id="teamLibSubmit">Guardar equipo</button>
         <button type="button" class="btn btn-ghost" id="teamLibCancelEdit" hidden>Cancelar edición</button>
@@ -1633,6 +1699,13 @@ function viewTeams() {
 function bindTeams() {
   const app = document.getElementById('app');
   let pendingImage = null;
+  let pendingAudio = null;
+
+  function updateAudioStatus() {
+    const el = app.querySelector('#teamLibAudioStatus');
+    if (!el) return;
+    el.textContent = pendingAudio ? 'Cántico asignado' : '';
+  }
 
   function fakeMatchForPreview(name, color, image) {
     return {
@@ -1674,11 +1747,15 @@ function bindTeams() {
 
   function resetForm() {
     pendingImage = null;
+    pendingAudio = null;
     app.querySelector('#teamLibEditId').value = '';
     app.querySelector('#teamLibName').value = '';
     app.querySelector('#teamLibPlayers').value = '';
     app.querySelector('#teamLibColor').value = DEFAULT_COLOR_A;
     app.querySelector('#teamLibFile').value = '';
+    const af = app.querySelector('#teamLibAudioFile');
+    if (af) af.value = '';
+    updateAudioStatus();
     app.querySelector('#teamLibFormTitle').textContent = 'Nuevo equipo';
     app.querySelector('#teamLibSubmit').textContent = 'Guardar equipo';
     app.querySelector('#teamLibCancelEdit').hidden = true;
@@ -1703,6 +1780,25 @@ function bindTeams() {
     refreshLibPreview();
   };
 
+  app.querySelector('#teamLibAudioFile').addEventListener('change', async (e) => {
+    const f = e.target.files && e.target.files[0];
+    if (!f) return;
+    try {
+      pendingAudio = await fileToAudioDataUrl(f);
+      updateAudioStatus();
+    } catch (err) {
+      showToast(err.message || 'No se pudo cargar el audio', { variant: 'error' });
+      e.target.value = '';
+    }
+  });
+
+  app.querySelector('#teamLibClearAudio').onclick = () => {
+    pendingAudio = null;
+    const af = app.querySelector('#teamLibAudioFile');
+    if (af) af.value = '';
+    updateAudioStatus();
+  };
+
   ['#teamLibName', '#teamLibColor'].forEach((sel) => {
     app.querySelector(sel).addEventListener('input', refreshLibPreview);
   });
@@ -1715,12 +1811,14 @@ function bindTeams() {
     if (!/^#[0-9A-Fa-f]{6}$/.test(color)) color = DEFAULT_COLOR_A;
     const editId = app.querySelector('#teamLibEditId').value;
     const img = pendingImage && isSafeDataImageUrl(pendingImage) ? pendingImage : null;
+    const audio = pendingAudio && isSafeTeamAudioDataUrl(pendingAudio) ? pendingAudio : null;
     const players = rosterFromTextarea(String(app.querySelector('#teamLibPlayers')?.value || ''));
     const team = {
       id: editId || newId(),
       name,
       color,
       image: img,
+      audio,
       players
     };
     saveSavedTeam(team);
@@ -1736,11 +1834,15 @@ function bindTeams() {
       const t = getSavedTeam(id);
       if (!t) return;
       pendingImage = t.image && isSafeDataImageUrl(t.image) ? t.image : null;
+      pendingAudio = t.audio && isSafeTeamAudioDataUrl(t.audio) ? t.audio : null;
       app.querySelector('#teamLibEditId').value = t.id;
       app.querySelector('#teamLibName').value = t.name;
       app.querySelector('#teamLibPlayers').value = (t.players || []).map((p) => p.name).join('\n');
       app.querySelector('#teamLibColor').value = t.color;
       app.querySelector('#teamLibFile').value = '';
+      const af = app.querySelector('#teamLibAudioFile');
+      if (af) af.value = '';
+      updateAudioStatus();
       app.querySelector('#teamLibFormTitle').textContent = 'Editar equipo';
       app.querySelector('#teamLibSubmit').textContent = 'Guardar cambios';
       app.querySelector('#teamLibCancelEdit').hidden = false;
@@ -1768,6 +1870,7 @@ function bindTeams() {
   });
 
   refreshLibPreview();
+  updateAudioStatus();
 }
 
 window.addEventListener('hashchange', render);

@@ -1,3 +1,5 @@
+import { isSafeTeamAudioDataUrl } from './audioUtils.js';
+
 const STORAGE_KEY = 'gamecounter_matches_v1';
 const TEAMS_KEY = 'gamecounter_saved_teams_v1';
 
@@ -126,6 +128,9 @@ function validateSavedTeamRaw(t) {
     if (typeof t.image !== 'string' || !t.image.startsWith('data:image/')) return false;
     if (t.image.length > 3_000_000) return false;
   }
+  if (t.audio != null) {
+    if (typeof t.audio !== 'string' || !isSafeTeamAudioDataUrl(t.audio)) return false;
+  }
   if (t.players != null) {
     if (!Array.isArray(t.players)) return false;
     if (t.players.length > 50) return false;
@@ -166,6 +171,12 @@ function validateMatchRaw(m) {
   if (!validateRosterOptional(m.rosterA)) return false;
   if (!validateRosterOptional(m.rosterB)) return false;
   if (!validateClockOptional(m.clock)) return false;
+  if (m.teamAAudio != null) {
+    if (typeof m.teamAAudio !== 'string' || !isSafeTeamAudioDataUrl(m.teamAAudio)) return false;
+  }
+  if (m.teamBAudio != null) {
+    if (typeof m.teamBAudio !== 'string' || !isSafeTeamAudioDataUrl(m.teamBAudio)) return false;
+  }
   return true;
 }
 

@@ -1,4 +1,5 @@
 import './style.css';
+import { applyTheme, getStoredTheme, setStoredTheme } from './theme.js';
 import { initPwaUpdates, checkForUpdatesManually, forceReloadLatestVersion } from './pwaUpdate.js';
 import {
   loadMatches,
@@ -46,6 +47,8 @@ import {
   resetClock
 } from './gameClock.js';
 import { formatDateES } from './dateFormat.js';
+
+applyTheme(getStoredTheme());
 
 function whatsAppTextUrl(text) {
   const q = encodeURIComponent(text);
@@ -284,9 +287,8 @@ function viewHome() {
     <div class="hero-brand">
       <p class="eyebrow">LIVE SCOREBOARD</p>
       <div class="logo-line" aria-hidden="true"></div>
+      <h1 class="eyebrow eyebrow--brand">GameScore</h1>
     </div>
-    <h1>GameScore</h1>
-    <p class="msg">Estilo transmisión oficial: fútbol o baloncesto. Tus datos solo en este dispositivo.</p>
     ${upcomingBanner}
     <div class="stack">
       <button type="button" class="btn btn-primary btn-block" data-act="new">Nuevo partido</button>
@@ -299,7 +301,20 @@ function viewHome() {
 }
 
 function bindHome() {
-  document.getElementById('app').onclick = (e) => {
+  const app = document.getElementById('app');
+  app.querySelectorAll('[data-theme-pick]').forEach((btn) => {
+    btn.addEventListener('click', (e) => {
+      e.stopPropagation();
+      const pick = btn.getAttribute('data-theme-pick');
+      if (pick !== 'light' && pick !== 'dark') return;
+      setStoredTheme(pick);
+      applyTheme(pick);
+      app.querySelectorAll('[data-theme-pick]').forEach((b) => {
+        b.classList.toggle('home-theme-btn--active', b.getAttribute('data-theme-pick') === pick);
+      });
+    });
+  });
+  app.onclick = (e) => {
     const b = e.target.closest('[data-act]');
     if (!b) return;
     const act = b.getAttribute('data-act');
@@ -1490,6 +1505,7 @@ function bindStatsBySport() {
 }
 
 function viewSettings() {
+  const theme = getStoredTheme();
   return `
     <div class="topbar">
       <button type="button" class="btn btn-ghost back" data-back>← Inicio</button>
@@ -1497,6 +1513,18 @@ function viewSettings() {
     <h1>Configuración</h1>
     <p class="msg">Equipos reutilizables y copias de seguridad. Todo se guarda en este dispositivo.</p>
     <div class="stack">
+      <div class="card settings-block">
+        <h2>Tema</h2>
+        <p class="settings-lead">Modo oscuro o claro para toda la aplicación.</p>
+        <div class="settings-theme-toggle" role="group" aria-label="Tema de la interfaz">
+          <button type="button" class="home-theme-btn${theme === 'dark' ? ' home-theme-btn--active' : ''}" data-theme-pick="dark" aria-label="Tema oscuro">
+            <svg class="home-theme-icon" xmlns="http://www.w3.org/2000/svg" width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M21 12.79A9 9 0 1 1 11.21 3 7 7 0 0 0 21 12.79z"/></svg>
+          </button>
+          <button type="button" class="home-theme-btn${theme === 'light' ? ' home-theme-btn--active' : ''}" data-theme-pick="light" aria-label="Tema claro">
+            <svg class="home-theme-icon" xmlns="http://www.w3.org/2000/svg" width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><circle cx="12" cy="12" r="4"/><path d="M12 2v2M12 20v2M4.93 4.93l1.41 1.41M17.66 17.66l1.41 1.41M2 12h2M20 12h2M4.93 19.07l1.41-1.41M17.66 6.34l1.41-1.41"/></svg>
+          </button>
+        </div>
+      </div>
       <div class="card settings-block">
         <h2>Equipos guardados</h2>
         <p class="settings-lead">Define nombre, color e imagen una vez y elígelos al crear cada partido.</p>
@@ -1531,6 +1559,19 @@ function viewSettings() {
 function bindSettings() {
   const app = document.getElementById('app');
   app.querySelector('[data-back]').onclick = () => navigate('home');
+
+  app.querySelectorAll('[data-theme-pick]').forEach((btn) => {
+    btn.addEventListener('click', () => {
+      const pick = btn.getAttribute('data-theme-pick');
+      if (pick !== 'light' && pick !== 'dark') return;
+      setStoredTheme(pick);
+      applyTheme(pick);
+      app.querySelectorAll('[data-theme-pick]').forEach((b) => {
+        b.classList.toggle('home-theme-btn--active', b.getAttribute('data-theme-pick') === pick);
+      });
+    });
+  });
+
   app.querySelector('[data-go-teams]').onclick = () => navigate('teams');
 
   app.querySelector('[data-check-pwa-update]').onclick = () => {
@@ -1633,7 +1674,6 @@ function viewTeams() {
             <div class="team-badge-slot team-lib-badge" data-team-lib-preview="${String(t.id).replace(/"/g, '')}" style="width:56px;height:56px;"></div>
             <div class="team-lib-row__text">
               <strong class="team-lib-name">${escapeHtml(t.name)}</strong>
-              <span class="team-lib-color">${escapeHtml(t.color)}</span>
             </div>
           </div>
           <div class="team-lib-row__actions">

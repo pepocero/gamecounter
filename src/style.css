@@ -1,4 +1,5 @@
 :root {
+  color-scheme: dark;
   --bg-deep: #060b12;
   --bg-mid: #0a1628;
   --bg-card: #0f2137;
@@ -195,6 +196,20 @@ textarea {
   margin: 0 auto 14px;
   background: linear-gradient(90deg, transparent, var(--gold), var(--gold-dim), transparent);
   border-radius: 2px;
+}
+
+.hero-brand .eyebrow--brand {
+  margin: 0;
+  padding: 0;
+  border: none;
+  font-family: var(--font-ui);
+  font-size: clamp(1.35rem, 5.5vw, 2rem);
+  font-weight: 700;
+  letter-spacing: 0.28em;
+  color: var(--gold);
+  text-transform: uppercase;
+  text-shadow: none;
+  line-height: 1.15;
 }
 
 .msg {
@@ -1776,12 +1791,6 @@ button.stat-box {
   letter-spacing: 0.04em;
 }
 
-.team-lib-color {
-  font-size: 0.8rem;
-  color: var(--muted);
-  font-family: ui-monospace, monospace;
-}
-
 .team-lib-row__actions {
   display: flex;
   gap: 8px;
@@ -1892,4 +1901,307 @@ button.stat-box {
   display: flex;
   flex-direction: column;
   gap: 8px;
+}
+
+/* ——— Configuración: selector de tema ——— */
+.settings-theme-toggle {
+  display: flex;
+  gap: 10px;
+  flex-wrap: wrap;
+}
+
+.home-theme-btn {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  min-width: 44px;
+  min-height: 44px;
+  padding: 0 12px;
+  border-radius: 10px;
+  border: 1px solid rgba(255, 255, 255, 0.12);
+  background: rgba(0, 0, 0, 0.2);
+  color: var(--muted);
+  cursor: pointer;
+  touch-action: manipulation;
+}
+
+.home-theme-icon {
+  display: block;
+  flex-shrink: 0;
+}
+
+.home-theme-btn--active {
+  border-color: rgba(201, 162, 39, 0.55);
+  background: rgba(201, 162, 39, 0.18);
+  color: var(--gold);
+  box-shadow: inset 0 0 0 1px rgba(201, 162, 39, 0.15);
+}
+
+/* ——— Modo claro (por defecto sigue siendo oscuro en :root) ——— */
+html[data-theme='light'] {
+  color-scheme: light;
+  --bg-deep: #e8eef4;
+  --bg-mid: #dce6f0;
+  --bg-card: #ffffff;
+  --surface: #cbd5e1;
+  --surface2: #64748b;
+  --text: #0f172a;
+  --muted: #475569;
+  --gold: #92400e;
+  --gold-dim: #78350f;
+  --accent: #1d4ed8;
+  --accent-hot: #be123c;
+  --danger: #dc2626;
+  --ok: #15803d;
+}
+
+html[data-theme='light'] body {
+  color: var(--text);
+  background: var(--bg-deep);
+  background-image:
+    radial-gradient(ellipse 120% 80% at 50% -20%, rgba(37, 99, 235, 0.12), transparent 55%),
+    radial-gradient(ellipse 80% 50% at 100% 50%, rgba(234, 179, 8, 0.07), transparent 45%),
+    radial-gradient(ellipse 60% 40% at 0% 80%, rgba(244, 63, 94, 0.05), transparent 40%),
+    linear-gradient(180deg, var(--bg-mid) 0%, var(--bg-deep) 55%, #cfd8e4 100%);
+}
+
+html[data-theme='light'] h1 {
+  color: var(--text);
+  text-shadow: none;
+}
+
+html[data-theme='light'] .hero-brand .eyebrow--brand {
+  color: var(--gold);
+}
+
+html[data-theme='light'] h2 {
+  color: var(--gold);
+}
+
+html[data-theme='light'] .msg {
+  background: rgba(255, 255, 255, 0.92);
+  border: 1px solid var(--surface);
+  color: var(--muted);
+}
+
+html[data-theme='light'] .msg.ok {
+  color: #166534;
+}
+
+html[data-theme='light'] .card {
+  background: linear-gradient(165deg, #ffffff 0%, #f1f5f9 100%);
+  border: 1px solid rgba(234, 179, 8, 0.35);
+  box-shadow:
+    0 0 0 1px rgba(15, 23, 42, 0.06),
+    0 12px 32px rgba(15, 23, 42, 0.08);
+}
+
+html[data-theme='light'] .team-setup {
+  background: rgba(255, 255, 255, 0.65);
+  border: 1px solid rgba(37, 99, 235, 0.2);
+}
+
+html[data-theme='light'] .btn {
+  color: #fff;
+  box-shadow: 0 4px 14px rgba(15, 23, 42, 0.12);
+}
+
+html[data-theme='light'] .btn-ghost {
+  background: rgba(255, 255, 255, 0.92);
+  border: 1px solid var(--surface);
+  color: var(--text);
+  box-shadow: none;
+}
+
+html[data-theme='light'] .home-theme-btn {
+  border-color: var(--surface);
+  background: #f1f5f9;
+  color: var(--muted);
+}
+
+html[data-theme='light'] .home-theme-btn--active {
+  border-color: rgba(234, 179, 8, 0.65);
+  background: rgba(254, 243, 199, 0.95);
+  color: var(--gold);
+  box-shadow: none;
+}
+
+html[data-theme='light'] .home-upcoming-banner {
+  border-color: rgba(234, 179, 8, 0.45);
+  background: linear-gradient(135deg, rgba(254, 243, 199, 0.9) 0%, rgba(255, 255, 255, 0.95) 55%, #f1f5f9 100%);
+  box-shadow:
+    0 0 0 1px rgba(15, 23, 42, 0.06),
+    0 8px 24px rgba(15, 23, 42, 0.1);
+}
+
+html[data-theme='light'] .home-upcoming-copy strong {
+  color: var(--text);
+}
+
+html[data-theme='light'] .list-item {
+  background: rgba(255, 255, 255, 0.9);
+  border: 1px solid rgba(234, 179, 8, 0.25);
+}
+
+html[data-theme='light'] .list-item:hover {
+  border-color: rgba(37, 99, 235, 0.35);
+}
+
+html[data-theme='light'] .stat-box {
+  background: rgba(255, 255, 255, 0.92);
+  border: 1px solid rgba(37, 99, 235, 0.18);
+}
+
+html[data-theme='light'] .stat-box--soccer {
+  border-color: rgba(22, 163, 74, 0.35);
+  background: linear-gradient(145deg, rgba(220, 252, 231, 0.6) 0%, rgba(255, 255, 255, 0.95) 100%);
+}
+
+html[data-theme='light'] .stat-box--basket {
+  border-color: rgba(234, 88, 12, 0.35);
+  background: linear-gradient(145deg, rgba(255, 237, 213, 0.65) 0%, rgba(255, 255, 255, 0.95) 100%);
+}
+
+html[data-theme='light'] .broadcast-wrap {
+  border-color: rgba(234, 179, 8, 0.45);
+  box-shadow:
+    0 0 18px rgba(234, 179, 8, 0.1),
+    0 16px 40px rgba(15, 23, 42, 0.12);
+}
+
+html[data-theme='light'] .broadcast-top {
+  background: linear-gradient(90deg, #e2e8f0 0%, #f8fafc 50%, #e2e8f0 100%);
+}
+
+html[data-theme='light'] .broadcast-meta {
+  background: #f1f5f9;
+}
+
+html[data-theme='light'] .game-clock-bar {
+  background: #f8fafc;
+  border-bottom-color: rgba(234, 179, 8, 0.25);
+}
+
+html[data-theme='light'] .broadcast-scores {
+  background: linear-gradient(180deg, #f1f5f9 0%, #e8eef4 100%);
+}
+
+html[data-theme='light'] .score-mega {
+  color: var(--text);
+  text-shadow: 0 1px 0 rgba(255, 255, 255, 0.8);
+}
+
+html[data-theme='light'] .team-name-broadcast {
+  color: var(--text);
+}
+
+html[data-theme='light'] .live-chant-hint {
+  color: var(--muted);
+}
+
+html[data-theme='light'] .team-lib-audio-status {
+  color: var(--muted);
+}
+
+html[data-theme='light'] .team-badge {
+  border-color: rgba(15, 23, 42, 0.15);
+  box-shadow: 0 8px 20px rgba(15, 23, 42, 0.12);
+}
+
+html[data-theme='light'] .team-badge-slot--audio:focus-visible {
+  outline-color: rgba(15, 23, 42, 0.45);
+}
+
+html[data-theme='light'] .btn-pt {
+  color: #fff;
+}
+
+html[data-theme='light'] .live-scoring-log {
+  background: linear-gradient(180deg, #f8fafc 0%, #eef2f7 100%);
+  border-top-color: rgba(15, 23, 42, 0.08);
+}
+
+html[data-theme='light'] .live-scoring-log-toggle {
+  background: rgba(255, 255, 255, 0.9);
+  border-color: rgba(234, 179, 8, 0.35);
+}
+
+html[data-theme='light'] .live-scoring-log-toggle:active {
+  background: #f1f5f9;
+}
+
+html[data-theme='light'] .live-scoring-log-panel {
+  background: rgba(255, 255, 255, 0.95);
+  border-color: rgba(15, 23, 42, 0.1);
+}
+
+html[data-theme='light'] .live-scoring-log-item {
+  border-bottom-color: rgba(15, 23, 42, 0.08);
+  color: var(--text);
+}
+
+html[data-theme='light'] .live-scoring-log-pts {
+  color: var(--muted);
+}
+
+html[data-theme='light'] .broadcast-actions {
+  background: rgba(248, 250, 252, 0.98);
+  border-top-color: rgba(234, 179, 8, 0.25);
+}
+
+html[data-theme='light'] .share-score-line {
+  color: var(--text);
+}
+
+html[data-theme='light'] .preview-img {
+  border-color: rgba(234, 179, 8, 0.35);
+  box-shadow: 0 8px 24px rgba(15, 23, 42, 0.1);
+}
+
+html[data-theme='light'] .toast {
+  background: linear-gradient(145deg, #ffffff 0%, #f1f5f9 100%);
+  border-color: rgba(15, 23, 42, 0.12);
+  box-shadow:
+    0 0 0 1px rgba(15, 23, 42, 0.06),
+    0 16px 40px rgba(15, 23, 42, 0.15);
+}
+
+html[data-theme='light'] .toast-text {
+  color: var(--text);
+}
+
+html[data-theme='light'] .modal-card {
+  background: linear-gradient(180deg, #ffffff 0%, #f1f5f9 100%);
+  border-color: rgba(234, 179, 8, 0.35);
+}
+
+html[data-theme='light'] .modal-title {
+  color: var(--text);
+}
+
+html[data-theme='light'] .modal-actions {
+  border-top-color: rgba(15, 23, 42, 0.08);
+  background: rgba(241, 245, 249, 0.95);
+}
+
+html[data-theme='light'] .btn-modal-secondary {
+  background: #f1f5f9;
+  border-color: var(--surface);
+  color: var(--text);
+}
+
+html[data-theme='light'] .settings-lead strong {
+  color: #334155;
+}
+
+html[data-theme='light'] .upcoming-date {
+  color: var(--text);
+}
+
+html[data-theme='light'] input,
+html[data-theme='light'] select,
+html[data-theme='light'] textarea {
+  background: #fff;
+  color: var(--text);
+  border-color: var(--surface);
 }

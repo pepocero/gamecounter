@@ -1,5 +1,11 @@
+import { readFileSync } from 'node:fs';
+import { fileURLToPath } from 'node:url';
+import { dirname, join } from 'node:path';
 import { defineConfig } from 'vite';
 import { VitePWA } from 'vite-plugin-pwa';
+
+const __dirname = dirname(fileURLToPath(import.meta.url));
+const pkg = JSON.parse(readFileSync(join(__dirname, 'package.json'), 'utf-8'));
 
 export default defineConfig({
   plugins: [
@@ -33,7 +39,9 @@ export default defineConfig({
       },
       workbox: {
         globPatterns: ['**/*.{js,css,html,ico,svg,woff2}'],
-        cleanupOutdatedCaches: true
+        cleanupOutdatedCaches: true,
+        /** Nuevo id de caché por versión para que el SW de la PWA detecte actualización */
+        cacheId: `gamescore-${pkg.version}`
       }
     })
   ]

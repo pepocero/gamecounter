@@ -4,6 +4,8 @@ import { initPwaUpdates, checkForUpdatesManually, forceReloadLatestVersion } fro
 import {
   loadMatches,
   saveMatch,
+  trySaveMatch,
+  StorageQuotaError,
   getMatch,
   newId,
   computeScores,
@@ -27,13 +29,9 @@ import {
   downloadImageBlob
 } from './share.js';
 import { teamColor, teamImage, teamInitial, teamAudio, DEFAULT_COLOR_A, DEFAULT_COLOR_B } from './teamVisual.js';
-import { fileToResizedJpegDataUrl, isSafeDataImageUrl } from './imageUtils.js';
-import {
-  stopTeamChant,
-  toggleTeamChant,
-  isSafeTeamAudioDataUrl,
-  fileToAudioDataUrl
-} from './audioUtils.js';
+import { fileToResizedJpegImageRef, isSafeDataImageUrl, isUsableTeamImage } from './imageUtils.js';
+import { stopTeamChant, toggleTeamChant, isUsableTeamAudio, fileToAudioRef } from './audioUtils.js';
+import { isIdbMediaRef, refToObjectURL, deleteMediaRef } from './mediaStore.js';
 import { showToast, showConfirm, showPlayerPicker } from './dialogs.js';
 import {
   createInitialClock,
@@ -49,6 +47,22 @@ import {
 import { formatDateES } from './dateFormat.js';
 
 applyTheme(getStoredTheme());
+
+const STORAGE_QUOTA_TOAST =
+  'Almacenamiento lleno en este dispositivo. En Configuración exporta un respaldo JSON y borra partidos finalizados u otros datos para liberar espacio.';
+
+function cloneClockState(clock) {
+  if (clock == null) return null;
+  try {
+    return structuredClone(clock);
+  } catch {
+    try {
+      return JSON.parse(JSON.stringify(clock));
+    } catch {
+      return clock;
+    }
+  }
+}
 
 function whatsAppTextUrl(text) {
   const q = encodeURIComponent(text);
@@ -137,14 +151,7 @@ function setPageClass(name) {
   app.className = map[name] || 'page-home';
 }
 
-function attachTeamBadgeSlot(slot, match, side, opts) {
-  if (!slot) return;
-  const live = opts && opts.live;
-  const color = teamColor(match, side);
-  const url = teamImage(match, side);
-  const name = side === 'A' ? match.teamA : match.teamB;
-  const chantUrl = teamAudio(match, side);
-  slot.innerHTML = '';
+function applyTeamBadgeAudioChrome(slot, live, chantUrl, side) {
   if (live && chantUrl) {
     slot.classList.add('team-badge-slot--audio');
     slot.setAttribute('role', 'button');
@@ -157,15 +164,28 @@ function attachTeamBadgeSlot(slot, match, side, opts) {
     slot.removeAttribute('tabindex');
     slot.removeAttribute('aria-label');
   }
-  if (url && isSafeDataImageUrl(url)) {
-    const wrap = document.createElement('div');
-    wrap.className = 'team-badge';
-    const img = document.createElement('img');
-    img.src = url;
-    img.alt = '';
-    wrap.appendChild(img);
-    slot.appendChild(wrap);
-  } else {
+}
+
+function attachTeamBadgeSlot(slot, match, side, opts) {
+  if (!slot) return;
+  const prevRevoke = slot.dataset.revokeBadgeUrl;
+  if (prevRevoke) {
+    try {
+      URL.revokeObjectURL(prevRevoke);
+    } catch {
+      /* ignore */
+    }
+    delete slot.dataset.revokeBadgeUrl;
+  }
+  const live = opts && opts.live;
+  const color = teamColor(match, side);
+  const url = teamImage(match, side);
+  const name = side === 'A' ? match.teamA : match.teamB;
+  const chantUrl = teamAudio(match, side);
+  slot.innerHTML = '';
+  applyTeamBadgeAudioChrome(slot, live, chantUrl, side);
+
+  function renderFallback() {
     const div = document.createElement('div');
     div.className = 'team-badge jersey-fallback';
     div.style.setProperty('--jersey-c', color);
@@ -174,6 +194,35 @@ function attachTeamBadgeSlot(slot, match, side, opts) {
     span.textContent = teamInitial(name);
     div.appendChild(span);
     slot.appendChild(div);
+  }
+
+  function renderImg(src) {
+    const wrap = document.createElement('div');
+    wrap.className = 'team-badge';
+    const img = document.createElement('img');
+    img.src = src;
+    img.alt = '';
+    wrap.appendChild(img);
+    slot.appendChild(wrap);
+  }
+
+  if (url && isSafeDataImageUrl(url)) {
+    renderImg(url);
+  } else if (url && isIdbMediaRef(url)) {
+    renderFallback();
+    void refToObjectURL(url).then((blobUrl) => {
+      if (!slot.isConnected) {
+        if (blobUrl) URL.revokeObjectURL(blobUrl);
+        return;
+      }
+      if (!blobUrl) return;
+      slot.dataset.revokeBadgeUrl = blobUrl;
+      slot.innerHTML = '';
+      applyTeamBadgeAudioChrome(slot, live, chantUrl, side);
+      renderImg(blobUrl);
+    });
+  } else {
+    renderFallback();
   }
 }
 
@@ -462,15 +511,23 @@ function bindNew() {
     if (side === 'A') {
       app.querySelector('#teamA').value = t.name;
       app.querySelector('#teamAColor').value = t.color;
-      pending.teamAImage = t.image && isSafeDataImageUrl(t.image) ? t.image : null;
-      pending.teamAAudio = t.audio && isSafeTeamAudioDataUrl(t.audio) ? t.audio : null;
+      const nextImg = t.image && isUsableTeamImage(t.image) ? t.image : null;
+      const nextAud = t.audio && isUsableTeamAudio(t.audio) ? t.audio : null;
+      if (isIdbMediaRef(pending.teamAImage) && pending.teamAImage !== nextImg) void deleteMediaRef(pending.teamAImage);
+      if (isIdbMediaRef(pending.teamAAudio) && pending.teamAAudio !== nextAud) void deleteMediaRef(pending.teamAAudio);
+      pending.teamAImage = nextImg;
+      pending.teamAAudio = nextAud;
       app.querySelector('#fileTeamA').value = '';
       app.querySelector('#rosterALines').value = rosterLines;
     } else {
       app.querySelector('#teamB').value = t.name;
       app.querySelector('#teamBColor').value = t.color;
-      pending.teamBImage = t.image && isSafeDataImageUrl(t.image) ? t.image : null;
-      pending.teamBAudio = t.audio && isSafeTeamAudioDataUrl(t.audio) ? t.audio : null;
+      const nextImg = t.image && isUsableTeamImage(t.image) ? t.image : null;
+      const nextAud = t.audio && isUsableTeamAudio(t.audio) ? t.audio : null;
+      if (isIdbMediaRef(pending.teamBImage) && pending.teamBImage !== nextImg) void deleteMediaRef(pending.teamBImage);
+      if (isIdbMediaRef(pending.teamBAudio) && pending.teamBAudio !== nextAud) void deleteMediaRef(pending.teamBAudio);
+      pending.teamBImage = nextImg;
+      pending.teamBAudio = nextAud;
       app.querySelector('#fileTeamB').value = '';
       app.querySelector('#rosterBLines').value = rosterLines;
     }
@@ -493,7 +550,8 @@ function bindNew() {
     const f = e.target.files && e.target.files[0];
     if (!f) return;
     try {
-      pending.teamAImage = await fileToResizedJpegDataUrl(f);
+      if (isIdbMediaRef(pending.teamAImage)) void deleteMediaRef(pending.teamAImage);
+      pending.teamAImage = await fileToResizedJpegImageRef(f);
       refreshPreview('A');
     } catch (err) {
       showToast(err.message || 'No se pudo cargar la imagen', { variant: 'error' });
@@ -504,7 +562,8 @@ function bindNew() {
     const f = e.target.files && e.target.files[0];
     if (!f) return;
     try {
-      pending.teamBImage = await fileToResizedJpegDataUrl(f);
+      if (isIdbMediaRef(pending.teamBImage)) void deleteMediaRef(pending.teamBImage);
+      pending.teamBImage = await fileToResizedJpegImageRef(f);
       refreshPreview('B');
     } catch (err) {
       showToast(err.message || 'No se pudo cargar la imagen', { variant: 'error' });
@@ -513,11 +572,13 @@ function bindNew() {
   };
 
   app.querySelector('#clearImgA').onclick = () => {
+    if (isIdbMediaRef(pending.teamAImage)) void deleteMediaRef(pending.teamAImage);
     pending.teamAImage = null;
     app.querySelector('#fileTeamA').value = '';
     refreshPreview('A');
   };
   app.querySelector('#clearImgB').onclick = () => {
+    if (isIdbMediaRef(pending.teamBImage)) void deleteMediaRef(pending.teamBImage);
     pending.teamBImage = null;
     app.querySelector('#fileTeamB').value = '';
     refreshPreview('B');
@@ -542,7 +603,7 @@ function bindNew() {
     if (intentInput) intentInput.value = 'live';
   });
 
-  app.querySelector('#form-new').onsubmit = (e) => {
+  app.querySelector('#form-new').onsubmit = async (e) => {
     e.preventDefault();
     const fd = new FormData(e.target);
     let formAction = String(fd.get('formAction') || '').trim();
@@ -571,10 +632,10 @@ function bindNew() {
       teamB,
       teamAColor,
       teamBColor,
-      teamAImage: pending.teamAImage && isSafeDataImageUrl(pending.teamAImage) ? pending.teamAImage : null,
-      teamBImage: pending.teamBImage && isSafeDataImageUrl(pending.teamBImage) ? pending.teamBImage : null,
-      teamAAudio: pending.teamAAudio && isSafeTeamAudioDataUrl(pending.teamAAudio) ? pending.teamAAudio : null,
-      teamBAudio: pending.teamBAudio && isSafeTeamAudioDataUrl(pending.teamBAudio) ? pending.teamBAudio : null,
+      teamAImage: pending.teamAImage && isUsableTeamImage(pending.teamAImage) ? pending.teamAImage : null,
+      teamBImage: pending.teamBImage && isUsableTeamImage(pending.teamBImage) ? pending.teamBImage : null,
+      teamAAudio: pending.teamAAudio && isUsableTeamAudio(pending.teamAAudio) ? pending.teamAAudio : null,
+      teamBAudio: pending.teamBAudio && isUsableTeamAudio(pending.teamBAudio) ? pending.teamBAudio : null,
       date,
       place,
       rosterA,
@@ -586,7 +647,20 @@ function bindNew() {
       endedAt: null,
       createdAt: now
     };
-    saveMatch(match);
+    const saved = await trySaveMatch(match);
+    if (!saved.ok) {
+      showToast(
+        'No hay espacio suficiente en este dispositivo. En Historial puedes borrar partidos finalizados; en Configuración, exporta un respaldo JSON y borra datos antiguos si hace falta.',
+        { variant: 'error' }
+      );
+      return;
+    }
+    if (saved.slimmed) {
+      showToast(
+        'Almacenamiento lleno: el partido se guardó sin escudos ni audio en el marcador. Libera espacio para volver a usarlos.',
+        { variant: 'error' }
+      );
+    }
     if (schedule) {
       try {
         sessionStorage.setItem('gamecounterHighlightUpcoming', match.id);
@@ -632,20 +706,13 @@ function viewLive(m) {
   const sportLabel = isSoccer ? 'FÚTBOL' : 'BALONCESTO';
   const ptsA = isSoccer
     ? `<button type="button" class="btn btn-pt" data-team="A" data-pt="1">Gol +1</button>`
-    : `
-      <div class="point-grid">
-        <button type="button" class="btn btn-pt" data-team="A" data-pt="1">+1</button>
-        <button type="button" class="btn btn-pt" data-team="A" data-pt="2">+2</button>
-        <button type="button" class="btn btn-pt" data-team="A" data-pt="3">+3</button>
-      </div>`;
+    : basketDialHtml('A');
   const ptsB = isSoccer
     ? `<button type="button" class="btn btn-pt" data-team="B" data-pt="1">Gol +1</button>`
-    : `
-      <div class="point-grid">
-        <button type="button" class="btn btn-pt" data-team="B" data-pt="1">+1</button>
-        <button type="button" class="btn btn-pt" data-team="B" data-pt="2">+2</button>
-        <button type="button" class="btn btn-pt" data-team="B" data-pt="3">+3</button>
-      </div>`;
+    : basketDialHtml('B');
+  const pointHint = isSoccer
+    ? 'Toca para sumar · <strong>Mantén apretado</strong> para restar la última anotación de ese tipo'
+    : 'Toca el cuadrado para sumar el valor mostrado (+2 al iniciar). <strong>Desliza</strong> a la derecha o izquierda para cambiar entre +1, +2 y +3. <strong>Mantén apretado</strong> para restar la última de ese tipo.';
 
   return `
     <div class="topbar">
@@ -699,7 +766,7 @@ function viewLive(m) {
         </div>
       </div>
       <div class="broadcast-actions">
-        <p class="point-hint">Toca para sumar · <strong>Mantén apretado</strong> para restar la última anotación de ese tipo</p>
+        <p class="point-hint">${pointHint}</p>
         <button type="button" class="btn btn-danger btn-block" data-end>Fin de partido</button>
       </div>
     </div>
@@ -707,12 +774,97 @@ function viewLive(m) {
 }
 
 const LONG_PRESS_MS = 520;
+/** Desliz horizontal mínimo para cambiar +1/+2/+3 en baloncesto */
+const BASKET_SWIPE_PX = 40;
+/** Si el dedo se mueve más que esto, se cancela el mantener pulsado para restar */
+const BASKET_MOVE_CANCEL_LONGPRESS_PX = 12;
 
 function validatePointButton(m, team, pt) {
   if (team !== 'A' && team !== 'B') return false;
   if (m.sport === 'soccer' && pt !== 1) return false;
   if (m.sport === 'basketball' && ![1, 2, 3].includes(pt)) return false;
   return true;
+}
+
+/** Deslizar a la derecha: ciclo 2 → 1 → 3 → 2 */
+function basketPtSwipeRight(cur) {
+  const order = [2, 1, 3];
+  const i = order.indexOf(cur);
+  return order[(i + 1) % 3];
+}
+
+/** Deslizar a la izquierda: ciclo 2 → 3 → 1 → 2 */
+function basketPtSwipeLeft(cur) {
+  const order = [2, 3, 1];
+  const i = order.indexOf(cur);
+  return order[(i + 1) % 3];
+}
+
+function updateBasketDialFace(face, pt) {
+  face.dataset.pt = String(pt);
+  face.setAttribute('aria-valuenow', String(pt));
+  const val = face.querySelector('.basket-dial__value');
+  if (val) val.textContent = `+${pt}`;
+  face.setAttribute(
+    'aria-label',
+    `Sumar ${pt} punto${pt === 1 ? '' : 's'}. Desliza a la derecha o a la izquierda para elegir más uno, más dos o más tres.`
+  );
+}
+
+function basketDialHtml(team) {
+  return `
+    <div class="basket-dial" data-basket-dial data-team="${team}">
+      <span class="basket-dial__peek basket-dial__peek--left" aria-hidden="true">+3</span>
+      <button type="button" class="basket-dial__face btn-pt" data-team="${team}" data-pt="2" role="spinbutton" aria-valuemin="1" aria-valuemax="3" aria-valuenow="2" aria-label="Sumar 2 puntos. Desliza a la derecha o a la izquierda para cambiar entre más uno, más dos y más tres.">
+        <span class="basket-dial__value">+2</span>
+      </button>
+      <span class="basket-dial__peek basket-dial__peek--right" aria-hidden="true">+1</span>
+    </div>`;
+}
+
+async function applyPointAdd(app, matchId, team, pt) {
+  const cur = getMatch(matchId);
+  if (!cur || cur.status !== 'live') return;
+  if (!validatePointButton(cur, team, pt)) return;
+  cur.clock = ensureClock(cur.clock);
+  const rosterRaw = team === 'A' ? cur.rosterA || [] : cur.rosterB || [];
+  const roster = Array.isArray(rosterRaw)
+    ? rosterRaw.map((p) => ({ id: p.id, name: p.name }))
+    : [];
+  let pick = { playerId: null, playerName: null };
+  if (roster.length > 0) {
+    const teamLabel = team === 'A' ? cur.teamA : cur.teamB;
+    await new Promise((r) => requestAnimationFrame(() => r()));
+    const r = await showPlayerPicker({
+      players: roster,
+      title: `¿Quién anotó? (${teamLabel})`
+    });
+    if (r === false) return;
+    pick = r;
+  }
+  const cur2 = getMatch(matchId);
+  if (!cur2 || cur2.status !== 'live') return;
+  cur2.clock = ensureClock(cur2.clock);
+  const gameTimeMs = getElapsedMs(cur2.clock);
+  cur2.events = cur2.events || [];
+  const ev = { team, points: pt, at: Date.now(), gameTimeMs };
+  if (pick.playerId != null) ev.playerId = pick.playerId;
+  if (pick.playerName) ev.playerName = pick.playerName;
+  cur2.events.push(ev);
+  try {
+    saveMatch(cur2);
+  } catch (e) {
+    if (e instanceof StorageQuotaError) {
+      cur2.events.pop();
+      showToast(
+        'Almacenamiento lleno: no se pudo guardar la anotación. Borra partidos finalizados en Historial o exporta y libera espacio en Configuración.',
+        { variant: 'error' }
+      );
+      return;
+    }
+    throw e;
+  }
+  refreshLiveView(app, matchId);
 }
 
 function refreshLiveView(app, matchId) {
@@ -723,55 +875,23 @@ function refreshLiveView(app, matchId) {
   bindLive(cur);
 }
 
-function bindScoreButtons(app, m) {
-  const buttons = app.querySelectorAll('.broadcast-wrap [data-team][data-pt]');
+function bindSoccerScoreButtons(app, m) {
+  const buttons = app.querySelectorAll('.broadcast-wrap .point-grid.soccer .btn-pt');
   buttons.forEach((btn) => {
     let pressTimer = null;
     let longPressFired = false;
     let addBusy = false;
+    const team = btn.getAttribute('data-team');
+    const pt = parseInt(btn.getAttribute('data-pt'), 10);
 
     const applyAdd = async () => {
-      const team = btn.getAttribute('data-team');
-      const pt = parseInt(btn.getAttribute('data-pt'), 10);
-      if (!validatePointButton(m, team, pt)) return;
-      if (addBusy) return;
-      const cur = getMatch(m.id);
-      if (!cur || cur.status !== 'live') return;
-      cur.clock = ensureClock(cur.clock);
-      const rosterRaw = team === 'A' ? cur.rosterA || [] : cur.rosterB || [];
-      const roster = Array.isArray(rosterRaw)
-        ? rosterRaw.map((p) => ({ id: p.id, name: p.name }))
-        : [];
+      if (!validatePointButton(m, team, pt) || addBusy) return;
       addBusy = true;
-      let pick = { playerId: null, playerName: null };
-      if (roster.length > 0) {
-        const teamLabel = team === 'A' ? cur.teamA : cur.teamB;
-        await new Promise((r) => requestAnimationFrame(() => r()));
-        const r = await showPlayerPicker({
-          players: roster,
-          title: `¿Quién anotó? (${teamLabel})`
-        });
-        if (r === false) {
-          addBusy = false;
-          return;
-        }
-        pick = r;
-      }
-      const cur2 = getMatch(m.id);
-      if (!cur2 || cur2.status !== 'live') {
+      try {
+        await applyPointAdd(app, m.id, team, pt);
+      } finally {
         addBusy = false;
-        return;
       }
-      cur2.clock = ensureClock(cur2.clock);
-      const gameTimeMs = getElapsedMs(cur2.clock);
-      cur2.events = cur2.events || [];
-      const ev = { team, points: pt, at: Date.now(), gameTimeMs };
-      if (pick.playerId != null) ev.playerId = pick.playerId;
-      if (pick.playerName) ev.playerName = pick.playerName;
-      cur2.events.push(ev);
-      saveMatch(cur2);
-      addBusy = false;
-      refreshLiveView(app, m.id);
     };
 
     const clearTimer = () => {
@@ -783,8 +903,6 @@ function bindScoreButtons(app, m) {
 
     btn.addEventListener('pointerdown', (e) => {
       if (e.button !== 0 && e.pointerType === 'mouse') return;
-      const team = btn.getAttribute('data-team');
-      const pt = parseInt(btn.getAttribute('data-pt'), 10);
       if (!validatePointButton(m, team, pt)) return;
       longPressFired = false;
       clearTimer();
@@ -801,7 +919,6 @@ function bindScoreButtons(app, m) {
           if (ok) navigator.vibrate(25);
           else navigator.vibrate([15, 40, 15]);
         }
-        /* La vista se actualiza en pointerup para no soltar el dedo sobre un botón nuevo y sumar de más */
       }, LONG_PRESS_MS);
     });
 
@@ -838,6 +955,133 @@ function bindScoreButtons(app, m) {
 
     btn.addEventListener('contextmenu', (e) => e.preventDefault());
   });
+}
+
+function bindBasketballDials(app, m) {
+  app.querySelectorAll('.broadcast-wrap [data-basket-dial]').forEach((dial) => {
+    const team = dial.getAttribute('data-team');
+    if (team !== 'A' && team !== 'B') return;
+    const face = dial.querySelector('.basket-dial__face');
+    if (!face) return;
+
+    let pressTimer = null;
+    let longPressFired = false;
+    let addBusy = false;
+    let startX = 0;
+    let startY = 0;
+    let movedPastSlop = false;
+
+    const getPt = () => parseInt(face.getAttribute('data-pt'), 10);
+
+    const applyAdd = async () => {
+      const pt = getPt();
+      if (!validatePointButton(m, team, pt) || addBusy) return;
+      addBusy = true;
+      try {
+        await applyPointAdd(app, m.id, team, pt);
+      } finally {
+        addBusy = false;
+      }
+    };
+
+    const clearTimer = () => {
+      if (pressTimer != null) {
+        clearTimeout(pressTimer);
+        pressTimer = null;
+      }
+    };
+
+    face.addEventListener('pointerdown', (e) => {
+      if (e.button !== 0 && e.pointerType === 'mouse') return;
+      movedPastSlop = false;
+      startX = e.clientX;
+      startY = e.clientY;
+      longPressFired = false;
+      clearTimer();
+      try {
+        face.setPointerCapture(e.pointerId);
+      } catch {
+        /* ignore */
+      }
+      pressTimer = window.setTimeout(() => {
+        pressTimer = null;
+        if (movedPastSlop) return;
+        longPressFired = true;
+        const pt0 = getPt();
+        const ok = removeLastScoringEvent(m.id, team, pt0);
+        if (typeof navigator !== 'undefined' && navigator.vibrate) {
+          if (ok) navigator.vibrate(25);
+          else navigator.vibrate([15, 40, 15]);
+        }
+      }, LONG_PRESS_MS);
+    });
+
+    face.addEventListener('pointermove', (e) => {
+      const dx = e.clientX - startX;
+      const dy = e.clientY - startY;
+      if (Math.hypot(dx, dy) > BASKET_MOVE_CANCEL_LONGPRESS_PX) {
+        movedPastSlop = true;
+        clearTimer();
+      }
+    });
+
+    face.addEventListener('pointerup', (e) => {
+      if (e.button !== 0 && e.pointerType === 'mouse') return;
+      try {
+        face.releasePointerCapture(e.pointerId);
+      } catch {
+        /* ignore */
+      }
+      clearTimer();
+
+      const dx = e.clientX - startX;
+      const dy = e.clientY - startY;
+
+      if (longPressFired) {
+        longPressFired = false;
+        refreshLiveView(app, m.id);
+        return;
+      }
+
+      const horizontal = Math.abs(dx) >= BASKET_SWIPE_PX && Math.abs(dx) > Math.abs(dy) * 0.65;
+      if (horizontal) {
+        const cur = getPt();
+        const next = dx > 0 ? basketPtSwipeRight(cur) : basketPtSwipeLeft(cur);
+        updateBasketDialFace(face, next);
+        if (typeof navigator !== 'undefined' && navigator.vibrate) {
+          navigator.vibrate(10);
+        }
+        return;
+      }
+
+      void applyAdd();
+    });
+
+    face.addEventListener('pointercancel', (e) => {
+      try {
+        face.releasePointerCapture(e.pointerId);
+      } catch {
+        /* ignore */
+      }
+      clearTimer();
+    });
+
+    face.addEventListener('keydown', (e) => {
+      if (e.key !== 'Enter' && e.key !== ' ') return;
+      e.preventDefault();
+      void applyAdd();
+    });
+
+    face.addEventListener('contextmenu', (e) => e.preventDefault());
+  });
+}
+
+function bindScoreButtons(app, m) {
+  if (m.sport === 'soccer') {
+    bindSoccerScoreButtons(app, m);
+  } else {
+    bindBasketballDials(app, m);
+  }
 }
 
 function bindLive(m) {
@@ -877,9 +1121,19 @@ function bindLive(m) {
     btnStart.onclick = () => {
       const cur = getMatch(m.id);
       if (!cur) return;
+      const prevClock = cloneClockState(cur.clock);
       cur.clock = ensureClock(cur.clock);
       startClock(cur.clock);
-      saveMatch(cur);
+      try {
+        saveMatch(cur);
+      } catch (e) {
+        if (e instanceof StorageQuotaError) {
+          cur.clock = prevClock;
+          showToast(STORAGE_QUOTA_TOAST, { variant: 'error' });
+          return;
+        }
+        throw e;
+      }
       clearLiveClockTimer();
       liveClockIntervalId = window.setInterval(updateClockUI, 250);
       updateClockUI();
@@ -889,9 +1143,19 @@ function bindLive(m) {
     btnPause.onclick = () => {
       const cur = getMatch(m.id);
       if (!cur) return;
+      const prevClock = cloneClockState(cur.clock);
       cur.clock = ensureClock(cur.clock);
       pauseClock(cur.clock);
-      saveMatch(cur);
+      try {
+        saveMatch(cur);
+      } catch (e) {
+        if (e instanceof StorageQuotaError) {
+          cur.clock = prevClock;
+          showToast(STORAGE_QUOTA_TOAST, { variant: 'error' });
+          return;
+        }
+        throw e;
+      }
       clearLiveClockTimer();
       updateClockUI();
     };
@@ -900,9 +1164,19 @@ function bindLive(m) {
     btnResume.onclick = () => {
       const cur = getMatch(m.id);
       if (!cur) return;
+      const prevClock = cloneClockState(cur.clock);
       cur.clock = ensureClock(cur.clock);
       startClock(cur.clock);
-      saveMatch(cur);
+      try {
+        saveMatch(cur);
+      } catch (e) {
+        if (e instanceof StorageQuotaError) {
+          cur.clock = prevClock;
+          showToast(STORAGE_QUOTA_TOAST, { variant: 'error' });
+          return;
+        }
+        throw e;
+      }
       clearLiveClockTimer();
       liveClockIntervalId = window.setInterval(updateClockUI, 250);
       updateClockUI();
@@ -921,23 +1195,23 @@ function bindLive(m) {
   app.querySelectorAll('[data-team-badge]').forEach((slot) => {
     const side = slot.getAttribute('data-team-badge');
     if (side !== 'A' && side !== 'B') return;
-    slot.addEventListener('click', (e) => {
+    slot.addEventListener('click', async (e) => {
       const cur = getMatch(m.id);
       if (!cur) return;
       const url = teamAudio(cur, side);
       if (!url) return;
       e.preventDefault();
       e.stopPropagation();
-      toggleTeamChant(side, url);
+      await toggleTeamChant(side, url);
     });
-    slot.addEventListener('keydown', (e) => {
+    slot.addEventListener('keydown', async (e) => {
       if (e.key !== 'Enter' && e.key !== ' ') return;
       const cur = getMatch(m.id);
       if (!cur) return;
       const url = teamAudio(cur, side);
       if (!url) return;
       e.preventDefault();
-      toggleTeamChant(side, url);
+      await toggleTeamChant(side, url);
     });
   });
 
@@ -955,10 +1229,20 @@ function bindLive(m) {
       if (!ok) return;
       const cur = getMatch(m.id);
       if (!cur) return;
+      const prevClock = cloneClockState(cur.clock);
       if (!cur.clock) cur.clock = createInitialClock();
       else ensureClock(cur.clock);
       resetClock(cur.clock);
-      saveMatch(cur);
+      try {
+        saveMatch(cur);
+      } catch (e) {
+        if (e instanceof StorageQuotaError) {
+          cur.clock = prevClock;
+          showToast(STORAGE_QUOTA_TOAST, { variant: 'error' });
+          return;
+        }
+        throw e;
+      }
       clearLiveClockTimer();
       updateClockUI();
     };
@@ -988,11 +1272,27 @@ function bindLive(m) {
       if (!ok) return;
       const cur = getMatch(m.id);
       if (!cur) return;
+      const snap = {
+        status: cur.status,
+        endedAt: cur.endedAt,
+        clock: cloneClockState(cur.clock)
+      };
       cur.clock = ensureClock(cur.clock);
       pauseClock(cur.clock);
       cur.status = 'finished';
       cur.endedAt = Date.now();
-      saveMatch(cur);
+      try {
+        saveMatch(cur);
+      } catch (e) {
+        if (e instanceof StorageQuotaError) {
+          cur.status = snap.status;
+          cur.endedAt = snap.endedAt;
+          cur.clock = snap.clock;
+          showToast(STORAGE_QUOTA_TOAST, { variant: 'error' });
+          return;
+        }
+        throw e;
+      }
       clearLiveClockTimer();
       navigate('share', m.id);
       return;
@@ -1201,7 +1501,7 @@ function bindHistory() {
         }
       );
       if (!ok) return;
-      deleteFinishedMatches();
+      await deleteFinishedMatches();
       showToast('Partidos finalizados eliminados.', { variant: 'success' });
       render();
     };
@@ -1320,16 +1620,34 @@ function bindUpcoming() {
   });
 
   app.querySelectorAll('[data-start-match]').forEach((btn) => {
-    btn.addEventListener('click', () => {
+    btn.addEventListener('click', async () => {
       const id = btn.getAttribute('data-start-match');
       const cur = getMatch(id);
       if (!cur || cur.status !== 'scheduled') return;
+      const backup = {
+        status: cur.status,
+        startedAt: cur.startedAt,
+        clock: cloneClockState(cur.clock)
+      };
       cur.status = 'live';
       cur.startedAt = Date.now();
       if (!cur.clock) cur.clock = createInitialClock();
       if (!Array.isArray(cur.rosterA)) cur.rosterA = [];
       if (!Array.isArray(cur.rosterB)) cur.rosterB = [];
-      saveMatch(cur);
+      const r = await trySaveMatch(cur);
+      if (!r.ok) {
+        cur.status = backup.status;
+        cur.startedAt = backup.startedAt;
+        cur.clock = backup.clock;
+        showToast(STORAGE_QUOTA_TOAST, { variant: 'error' });
+        return;
+      }
+      if (r.slimmed) {
+        showToast(
+          'Almacenamiento lleno: el partido se guardó sin escudos ni audio en el marcador. Libera espacio para usarlos.',
+          { variant: 'error' }
+        );
+      }
       navigate('live', id);
     });
   });
@@ -1346,7 +1664,7 @@ function bindUpcoming() {
         danger: true
       });
       if (!ok) return;
-      deleteMatch(id);
+      await deleteMatch(id);
       showToast('Programación eliminada', { variant: 'success' });
       render();
     });
@@ -1421,7 +1739,7 @@ function bindStats() {
       }
     );
     if (!ok) return;
-    deleteFinishedMatches();
+    await deleteFinishedMatches();
     showToast('Partidos finalizados eliminados.', { variant: 'success' });
     render();
   };
@@ -1592,9 +1910,9 @@ function bindSettings() {
     await forceReloadLatestVersion();
   };
 
-  app.querySelector('[data-export-json]').onclick = () => {
+  app.querySelector('[data-export-json]').onclick = async () => {
     try {
-      const payload = buildExportPayload();
+      const payload = await buildExportPayload();
       const json = JSON.stringify(payload, null, 2);
       const d = new Date();
       const stamp = `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`;
@@ -1658,7 +1976,7 @@ function bindSettings() {
       }
     );
     if (!ok) return;
-    clearAllAppData();
+    await clearAllAppData();
     showToast('Datos eliminados. La aplicación está en blanco.', { variant: 'success' });
     navigate('home');
   };
@@ -1786,6 +2104,12 @@ function bindTeams() {
   });
 
   function resetForm() {
+    const editId = app.querySelector('#teamLibEditId')?.value?.trim();
+    const orig = editId ? getSavedTeam(editId) : null;
+    const origImg = orig && orig.image != null ? orig.image : null;
+    const origAud = orig && orig.audio != null ? orig.audio : null;
+    if (isIdbMediaRef(pendingImage) && pendingImage !== origImg) void deleteMediaRef(pendingImage);
+    if (isIdbMediaRef(pendingAudio) && pendingAudio !== origAud) void deleteMediaRef(pendingAudio);
     pendingImage = null;
     pendingAudio = null;
     app.querySelector('#teamLibEditId').value = '';
@@ -1806,7 +2130,8 @@ function bindTeams() {
     const f = e.target.files && e.target.files[0];
     if (!f) return;
     try {
-      pendingImage = await fileToResizedJpegDataUrl(f);
+      if (isIdbMediaRef(pendingImage)) void deleteMediaRef(pendingImage);
+      pendingImage = await fileToResizedJpegImageRef(f);
       refreshLibPreview();
     } catch (err) {
       showToast(err.message || 'No se pudo cargar la imagen', { variant: 'error' });
@@ -1815,6 +2140,7 @@ function bindTeams() {
   });
 
   app.querySelector('#teamLibClearImg').onclick = () => {
+    if (isIdbMediaRef(pendingImage)) void deleteMediaRef(pendingImage);
     pendingImage = null;
     app.querySelector('#teamLibFile').value = '';
     refreshLibPreview();
@@ -1824,7 +2150,8 @@ function bindTeams() {
     const f = e.target.files && e.target.files[0];
     if (!f) return;
     try {
-      pendingAudio = await fileToAudioDataUrl(f);
+      if (isIdbMediaRef(pendingAudio)) void deleteMediaRef(pendingAudio);
+      pendingAudio = await fileToAudioRef(f);
       updateAudioStatus();
     } catch (err) {
       showToast(err.message || 'No se pudo cargar el audio', { variant: 'error' });
@@ -1833,6 +2160,7 @@ function bindTeams() {
   });
 
   app.querySelector('#teamLibClearAudio').onclick = () => {
+    if (isIdbMediaRef(pendingAudio)) void deleteMediaRef(pendingAudio);
     pendingAudio = null;
     const af = app.querySelector('#teamLibAudioFile');
     if (af) af.value = '';
@@ -1850,8 +2178,13 @@ function bindTeams() {
     if (!name) return;
     if (!/^#[0-9A-Fa-f]{6}$/.test(color)) color = DEFAULT_COLOR_A;
     const editId = app.querySelector('#teamLibEditId').value;
-    const img = pendingImage && isSafeDataImageUrl(pendingImage) ? pendingImage : null;
-    const audio = pendingAudio && isSafeTeamAudioDataUrl(pendingAudio) ? pendingAudio : null;
+    const img = pendingImage && isUsableTeamImage(pendingImage) ? pendingImage : null;
+    const audio = pendingAudio && isUsableTeamAudio(pendingAudio) ? pendingAudio : null;
+    const prevTeam = editId ? getSavedTeam(editId) : null;
+    if (prevTeam) {
+      if (prevTeam.image && prevTeam.image !== img && isIdbMediaRef(prevTeam.image)) void deleteMediaRef(prevTeam.image);
+      if (prevTeam.audio && prevTeam.audio !== audio && isIdbMediaRef(prevTeam.audio)) void deleteMediaRef(prevTeam.audio);
+    }
     const players = rosterFromTextarea(String(app.querySelector('#teamLibPlayers')?.value || ''));
     const team = {
       id: editId || newId(),
@@ -1861,7 +2194,18 @@ function bindTeams() {
       audio,
       players
     };
-    saveSavedTeam(team);
+    try {
+      saveSavedTeam(team);
+    } catch (e) {
+      if (e instanceof StorageQuotaError) {
+        showToast(
+          'No hay espacio para guardar el equipo. Quita imagen o audio, o borra datos antiguos en Configuración.',
+          { variant: 'error' }
+        );
+        return;
+      }
+      throw e;
+    }
     showToast(editId ? 'Equipo actualizado' : 'Equipo guardado', { variant: 'success' });
     render();
   });
@@ -1873,8 +2217,18 @@ function bindTeams() {
       const id = btn.getAttribute('data-edit-team');
       const t = getSavedTeam(id);
       if (!t) return;
-      pendingImage = t.image && isSafeDataImageUrl(t.image) ? t.image : null;
-      pendingAudio = t.audio && isSafeTeamAudioDataUrl(t.audio) ? t.audio : null;
+      const prevEditId = app.querySelector('#teamLibEditId')?.value?.trim();
+      const prevTeam = prevEditId ? getSavedTeam(prevEditId) : null;
+      if (isIdbMediaRef(pendingImage)) {
+        const keep = prevTeam && pendingImage === prevTeam.image;
+        if (!keep) void deleteMediaRef(pendingImage);
+      }
+      if (isIdbMediaRef(pendingAudio)) {
+        const keep = prevTeam && pendingAudio === prevTeam.audio;
+        if (!keep) void deleteMediaRef(pendingAudio);
+      }
+      pendingImage = t.image && isUsableTeamImage(t.image) ? t.image : null;
+      pendingAudio = t.audio && isUsableTeamAudio(t.audio) ? t.audio : null;
       app.querySelector('#teamLibEditId').value = t.id;
       app.querySelector('#teamLibName').value = t.name;
       app.querySelector('#teamLibPlayers').value = (t.players || []).map((p) => p.name).join('\n');
@@ -1903,7 +2257,7 @@ function bindTeams() {
         danger: true
       });
       if (!ok) return;
-      deleteSavedTeam(id);
+      await deleteSavedTeam(id);
       showToast('Equipo eliminado', { variant: 'success' });
       render();
     });

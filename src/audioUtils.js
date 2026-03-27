@@ -1,4 +1,5 @@
 import { showToast } from './dialogs.js';
+import { isIdbMediaRef, putMediaBlob, refToObjectURL } from './mediaStore.js';
 
 const MAX_AUDIO_FILE_BYTES = 5 * 1024 * 1024;
 /** Límite de cadena data URL (localStorage / JSON). */
@@ -7,6 +8,11 @@ export const MAX_TEAM_AUDIO_DATA_URL_LENGTH = 2_800_000;
 export function isSafeTeamAudioDataUrl(s) {
   if (typeof s !== 'string' || s.length > MAX_TEAM_AUDIO_DATA_URL_LENGTH) return false;
   return s.startsWith('data:audio/');
+}
+
+/** Data URL o referencia `idb:`. */
+export function isUsableTeamAudio(s) {
+  return isSafeTeamAudioDataUrl(s) || isIdbMediaRef(s);
 }
 
 export function fileToAudioDataUrl(file) {
@@ -37,10 +43,40 @@ export function fileToAudioDataUrl(file) {
   });
 }
 
+/** Guarda el archivo de audio en IndexedDB; devuelve `idb:<uuid>`. */
+export function fileToAudioRef(file) {
+  return new Promise((resolve, reject) => {
+    if (!file || typeof file.type !== 'string' || !file.type.startsWith('audio/')) {
+      reject(new Error('Selecciona un archivo de audio'));
+      return;
+    }
+    if (file.size > MAX_AUDIO_FILE_BYTES) {
+      reject(new Error('El audio es demasiado grande (máx. 5 MB).'));
+      return;
+    }
+    putMediaBlob(file)
+      .then((ref) => resolve(ref))
+      .catch((e) => reject(e instanceof Error ? e : new Error('No se pudo guardar el audio')));
+  });
+}
+
 let currentAudio = null;
 let currentSide = null;
+let currentAudioBlobUrl = null;
+
+function revokeCurrentAudioBlobUrl() {
+  if (currentAudioBlobUrl) {
+    try {
+      URL.revokeObjectURL(currentAudioBlobUrl);
+    } catch {
+      /* ignore */
+    }
+    currentAudioBlobUrl = null;
+  }
+}
 
 export function stopTeamChant() {
+  revokeCurrentAudioBlobUrl();
   if (currentAudio) {
     try {
       currentAudio.pause();
@@ -56,15 +92,26 @@ export function stopTeamChant() {
 
 /**
  * Si ya suena ese equipo, para. Si no, para el otro y reproduce este.
+ * Acepta data URL o referencia `idb:`.
  */
-export function toggleTeamChant(side, dataUrl) {
+export async function toggleTeamChant(side, dataUrlOrRef) {
   if (side !== 'A' && side !== 'B') return;
   if (currentSide === side && currentAudio) {
     stopTeamChant();
     return;
   }
   stopTeamChant();
-  const el = new Audio(dataUrl);
+  let src = dataUrlOrRef;
+  if (typeof dataUrlOrRef === 'string' && isIdbMediaRef(dataUrlOrRef)) {
+    const u = await refToObjectURL(dataUrlOrRef);
+    if (!u) {
+      showToast('No se pudo cargar el audio guardado', { variant: 'error' });
+      return;
+    }
+    currentAudioBlobUrl = u;
+    src = u;
+  }
+  const el = new Audio(src);
   currentAudio = el;
   currentSide = side;
   const done = () => {

@@ -646,6 +646,50 @@ textarea {
   max-width: min(200px, 100%);
 }
 
+/* Baloncesto: un cuadrado tipo “dado”, +2 por defecto; deslizar cambia +1/+2/+3 */
+.basket-dial {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 8px;
+  width: 100%;
+  max-width: min(240px, 100%);
+  margin: 0 auto;
+  user-select: none;
+  -webkit-user-select: none;
+  touch-action: none;
+}
+
+.basket-dial__peek {
+  font-size: 0.68rem;
+  font-weight: 800;
+  letter-spacing: 0.04em;
+  color: var(--muted);
+  opacity: 0.85;
+  min-width: 1.35rem;
+  text-align: center;
+  line-height: 1.1;
+}
+
+.basket-dial__face {
+  flex-shrink: 0;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  margin: 0;
+  font: inherit;
+  cursor: pointer;
+  touch-action: none;
+}
+
+.basket-dial__value {
+  font-family: var(--font-display);
+  font-size: clamp(1.65rem, 7.5vw, 2.35rem);
+  line-height: 1;
+  font-weight: 400;
+  letter-spacing: 0.02em;
+}
+
 .btn-pt {
   min-height: 48px;
   min-width: 0;
@@ -683,6 +727,17 @@ textarea {
 .btn-pt[data-pt='2'] {
   background: linear-gradient(180deg, #14532d 0%, #166534 100%);
   border-color: rgba(74, 222, 128, 0.25);
+}
+
+.basket-dial .btn-pt.basket-dial__face {
+  width: min(92px, 24vw);
+  height: min(92px, 24vw);
+  min-width: 72px;
+  min-height: 72px;
+  max-width: 104px;
+  max-height: 104px;
+  padding: 0;
+  border-radius: 14px;
 }
 
 .live-scoring-log {

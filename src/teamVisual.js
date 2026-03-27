@@ -1,4 +1,5 @@
-import { isSafeTeamAudioDataUrl } from './audioUtils.js';
+import { isUsableTeamAudio } from './audioUtils.js';
+import { isUsableTeamImage } from './imageUtils.js';
 
 export const DEFAULT_COLOR_A = '#C9082A';
 export const DEFAULT_COLOR_B = '#17408B';
@@ -13,14 +14,14 @@ export function teamColor(match, side) {
 export function teamImage(match, side) {
   const k = side === 'A' ? 'teamAImage' : 'teamBImage';
   const v = match[k];
-  if (typeof v !== 'string' || !v.startsWith('data:image/')) return null;
+  if (typeof v !== 'string' || !isUsableTeamImage(v)) return null;
   return v;
 }
 
 export function teamAudio(match, side) {
   const k = side === 'A' ? 'teamAAudio' : 'teamBAudio';
   const v = match[k];
-  if (typeof v !== 'string' || !isSafeTeamAudioDataUrl(v)) return null;
+  if (typeof v !== 'string' || !isUsableTeamAudio(v)) return null;
   return v;
 }
 

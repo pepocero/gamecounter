@@ -1,6 +1,7 @@
 import { computeScores, basketballBreakdown } from './storage.js';
 import { teamColor, teamImage, teamInitial } from './teamVisual.js';
 import { isSafeDataImageUrl } from './imageUtils.js';
+import { isIdbMediaRef, refToDataUrl } from './mediaStore.js';
 import { formatClockMs } from './gameClock.js';
 import { formatDateES } from './dateFormat.js';
 
@@ -50,6 +51,24 @@ function loadImageElement(src) {
     i.onerror = () => reject(new Error('No se pudo cargar la imagen'));
     i.src = src;
   });
+}
+
+async function loadTeamImageForShare(match, side) {
+  const url = teamImage(match, side);
+  if (!url) return null;
+  let src = url;
+  if (isIdbMediaRef(url)) {
+    const data = await refToDataUrl(url);
+    if (!data) return null;
+    src = data;
+  } else if (!isSafeDataImageUrl(url)) {
+    return null;
+  }
+  try {
+    return await loadImageElement(src);
+  } catch {
+    return null;
+  }
 }
 
 function drawTeamCircle(ctx, cx, cy, r, color, img, initial) {
@@ -121,20 +140,8 @@ export async function renderMatchSummaryImage(match) {
   ctx.font = '700 32px system-ui, sans-serif';
   ctx.fillText(sport, w / 2, 168);
 
-  let imgA = null;
-  let imgB = null;
-  const urlA = teamImage(match, 'A');
-  const urlB = teamImage(match, 'B');
-  try {
-    if (urlA && isSafeDataImageUrl(urlA)) imgA = await loadImageElement(urlA);
-  } catch {
-    imgA = null;
-  }
-  try {
-    if (urlB && isSafeDataImageUrl(urlB)) imgB = await loadImageElement(urlB);
-  } catch {
-    imgB = null;
-  }
+  const imgA = await loadTeamImageForShare(match, 'A');
+  const imgB = await loadTeamImageForShare(match, 'B');
 
   const rLogo = 100;
   const yLogo = 340;

@@ -1,7 +1,34 @@
 import { isSafeTeamAudioDataUrl } from './audioUtils.js';
+import { isSafeDataImageUrl } from './imageUtils.js';
+import {
+  isIdbMediaRef,
+  collectIdbRefsFromMatch,
+  collectIdbRefsFromTeam,
+  deleteMediaRefs,
+  clearAllMediaBlobs,
+  refToDataUrl
+} from './mediaStore.js';
 
 const STORAGE_KEY = 'gamecounter_matches_v1';
 const TEAMS_KEY = 'gamecounter_saved_teams_v1';
+
+/** localStorage lleno (imágenes/audio en Base64 suelen llenar ~5 MB) */
+export class StorageQuotaError extends Error {
+  constructor(message = 'Almacenamiento lleno') {
+    super(message);
+    this.name = 'StorageQuotaError';
+  }
+}
+
+function isQuotaExceeded(e) {
+  return (
+    e &&
+    (e.name === 'QuotaExceededError' ||
+      e.code === 22 ||
+      e.code === 1014 ||
+      (typeof e.message === 'string' && e.message.toLowerCase().includes('quota')))
+  );
+}
 
 function safeParse(json, fallback) {
   try {
@@ -19,7 +46,12 @@ export function loadMatches() {
 }
 
 function persist(matches) {
-  localStorage.setItem(STORAGE_KEY, JSON.stringify(matches));
+  try {
+    localStorage.setItem(STORAGE_KEY, JSON.stringify(matches));
+  } catch (e) {
+    if (isQuotaExceeded(e)) throw new StorageQuotaError();
+    throw e;
+  }
 }
 
 export function saveMatch(match) {
@@ -31,19 +63,69 @@ export function saveMatch(match) {
   return match;
 }
 
+/** Quita multimedia del partido y borra los blobs asociados en IndexedDB. */
+export async function slimMatchMedia(match) {
+  const refs = collectIdbRefsFromMatch(match);
+  await deleteMediaRefs(refs);
+  return {
+    ...match,
+    teamAImage: null,
+    teamBImage: null,
+    teamAAudio: null,
+    teamBAudio: null
+  };
+}
+
+/**
+ * Intenta guardar el partido; si no cabe, reintenta sin escudos ni audio
+ * y actualiza el objeto `match` en memoria si hubo que recortar.
+ * @returns {{ ok: boolean, slimmed: boolean }}
+ */
+export async function trySaveMatch(match) {
+  try {
+    saveMatch(match);
+    return { ok: true, slimmed: false };
+  } catch (e) {
+    if (!(e instanceof StorageQuotaError)) throw e;
+    const hadMedia = !!(
+      match.teamAImage ||
+      match.teamBImage ||
+      match.teamAAudio ||
+      match.teamBAudio
+    );
+    if (!hadMedia) return { ok: false, slimmed: false };
+    const slim = await slimMatchMedia(match);
+    try {
+      saveMatch(slim);
+      Object.assign(match, slim);
+      return { ok: true, slimmed: true };
+    } catch (e2) {
+      if (e2 instanceof StorageQuotaError) return { ok: false, slimmed: false };
+      throw e2;
+    }
+  }
+}
+
 export function getMatch(id) {
   return loadMatches().find((m) => m.id === id) ?? null;
 }
 
-export function deleteMatch(id) {
+export async function deleteMatch(id) {
+  const cur = getMatch(id);
+  if (cur) await deleteMediaRefs(collectIdbRefsFromMatch(cur));
   const list = loadMatches().filter((m) => m.id !== id);
   persist(list);
 }
 
 /** Quita solo partidos finalizados (estadísticas e historial de finalizados). Mantiene programados, en vivo y equipos. */
-export function deleteFinishedMatches() {
-  const list = loadMatches().filter((m) => m.status !== 'finished');
-  persist(list);
+export async function deleteFinishedMatches() {
+  const list = loadMatches();
+  const refs = [];
+  for (const m of list) {
+    if (m.status === 'finished') refs.push(...collectIdbRefsFromMatch(m));
+  }
+  await deleteMediaRefs(refs);
+  persist(list.filter((m) => m.status !== 'finished'));
 }
 
 export function newId() {
@@ -65,7 +147,12 @@ export function loadSavedTeams() {
 }
 
 function persistSavedTeams(teams) {
-  localStorage.setItem(TEAMS_KEY, JSON.stringify(teams));
+  try {
+    localStorage.setItem(TEAMS_KEY, JSON.stringify(teams));
+  } catch (e) {
+    if (isQuotaExceeded(e)) throw new StorageQuotaError();
+    throw e;
+  }
 }
 
 export function saveSavedTeam(team) {
@@ -77,7 +164,9 @@ export function saveSavedTeam(team) {
   return team;
 }
 
-export function deleteSavedTeam(id) {
+export async function deleteSavedTeam(id) {
+  const cur = getSavedTeam(id);
+  if (cur) await deleteMediaRefs(collectIdbRefsFromTeam(cur));
   const list = loadSavedTeams().filter((t) => t.id !== id);
   persistSavedTeams(list);
 }
@@ -88,9 +177,9 @@ export function getSavedTeam(id) {
 
 /**
  * Borra todos los partidos y equipos guardados en este dispositivo (localStorage).
- * También limpia marcas auxiliares en sessionStorage. Irreversible.
+ * También vacía multimedia en IndexedDB y limpia marcas auxiliares en sessionStorage. Irreversible.
  */
-export function clearAllAppData() {
+export async function clearAllAppData() {
   if (typeof localStorage === 'undefined') return;
   try {
     localStorage.removeItem(STORAGE_KEY);
@@ -102,6 +191,11 @@ export function clearAllAppData() {
     if (typeof sessionStorage !== 'undefined') {
       sessionStorage.removeItem('gamecounterHighlightUpcoming');
     }
+  } catch {
+    /* ignore */
+  }
+  try {
+    await clearAllMediaBlobs();
   } catch {
     /* ignore */
   }
@@ -125,11 +219,14 @@ function validateSavedTeamRaw(t) {
   if (typeof t.name !== 'string' || !String(t.name).trim()) return false;
   if (!isValidHexColor(t.color)) return false;
   if (t.image != null) {
-    if (typeof t.image !== 'string' || !t.image.startsWith('data:image/')) return false;
-    if (t.image.length > 3_000_000) return false;
+    if (typeof t.image !== 'string') return false;
+    if (isSafeDataImageUrl(t.image)) {
+      if (t.image.length > 3_000_000) return false;
+    } else if (!isIdbMediaRef(t.image)) return false;
   }
   if (t.audio != null) {
-    if (typeof t.audio !== 'string' || !isSafeTeamAudioDataUrl(t.audio)) return false;
+    if (typeof t.audio !== 'string') return false;
+    if (!isSafeTeamAudioDataUrl(t.audio) && !isIdbMediaRef(t.audio)) return false;
   }
   if (t.players != null) {
     if (!Array.isArray(t.players)) return false;
@@ -171,25 +268,64 @@ function validateMatchRaw(m) {
   if (!validateRosterOptional(m.rosterA)) return false;
   if (!validateRosterOptional(m.rosterB)) return false;
   if (!validateClockOptional(m.clock)) return false;
+  if (m.teamAImage != null) {
+    if (typeof m.teamAImage !== 'string') return false;
+    if (isSafeDataImageUrl(m.teamAImage)) {
+      if (m.teamAImage.length > 3_000_000) return false;
+    } else if (!isIdbMediaRef(m.teamAImage)) return false;
+  }
+  if (m.teamBImage != null) {
+    if (typeof m.teamBImage !== 'string') return false;
+    if (isSafeDataImageUrl(m.teamBImage)) {
+      if (m.teamBImage.length > 3_000_000) return false;
+    } else if (!isIdbMediaRef(m.teamBImage)) return false;
+  }
   if (m.teamAAudio != null) {
-    if (typeof m.teamAAudio !== 'string' || !isSafeTeamAudioDataUrl(m.teamAAudio)) return false;
+    if (typeof m.teamAAudio !== 'string') return false;
+    if (!isSafeTeamAudioDataUrl(m.teamAAudio) && !isIdbMediaRef(m.teamAAudio)) return false;
   }
   if (m.teamBAudio != null) {
-    if (typeof m.teamBAudio !== 'string' || !isSafeTeamAudioDataUrl(m.teamBAudio)) return false;
+    if (typeof m.teamBAudio !== 'string') return false;
+    if (!isSafeTeamAudioDataUrl(m.teamBAudio) && !isIdbMediaRef(m.teamBAudio)) return false;
   }
   return true;
 }
 
+async function resolveMatchForExport(m) {
+  const o = { ...m };
+  for (const k of ['teamAImage', 'teamBImage', 'teamAAudio', 'teamBAudio']) {
+    const v = o[k];
+    if (v != null && typeof v === 'string' && isIdbMediaRef(v)) {
+      const data = await refToDataUrl(v);
+      o[k] = data;
+    }
+  }
+  return o;
+}
+
+async function resolveTeamForExport(t) {
+  const o = { ...t };
+  for (const k of ['image', 'audio']) {
+    const v = o[k];
+    if (v != null && typeof v === 'string' && isIdbMediaRef(v)) {
+      o[k] = await refToDataUrl(v);
+    }
+  }
+  return o;
+}
+
 /**
- * Exporta todo el estado de la app. Las imágenes van como data URLs dentro del JSON.
+ * Exporta todo el estado de la app. Las referencias IndexedDB se convierten a data URLs en el JSON.
  */
-export function buildExportPayload() {
+export async function buildExportPayload() {
+  const matches = await Promise.all(loadMatches().map((m) => resolveMatchForExport(m)));
+  const savedTeams = await Promise.all(loadSavedTeams().map((t) => resolveTeamForExport(t)));
   return {
     version: 1,
     app: 'gamecounter',
     exportedAt: new Date().toISOString(),
-    matches: loadMatches(),
-    savedTeams: loadSavedTeams()
+    matches,
+    savedTeams
   };
 }
 
@@ -259,9 +395,15 @@ export function removeLastScoringEvent(matchId, team, points) {
   const ev = cur.events || [];
   for (let i = ev.length - 1; i >= 0; i--) {
     if (ev[i].team === team && ev[i].points === points) {
-      ev.splice(i, 1);
-      saveMatch(cur);
-      return true;
+      const removed = ev.splice(i, 1)[0];
+      try {
+        saveMatch(cur);
+        return true;
+      } catch (e) {
+        ev.splice(i, 0, removed);
+        if (e instanceof StorageQuotaError) return false;
+        throw e;
+      }
     }
   }
   return false;

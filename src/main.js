@@ -814,11 +814,13 @@ function updateBasketDialFace(face, pt) {
 function basketDialHtml(team) {
   return `
     <div class="basket-dial" data-basket-dial data-team="${team}">
-      <span class="basket-dial__peek basket-dial__peek--left" aria-hidden="true">+3</span>
       <button type="button" class="basket-dial__face btn-pt" data-team="${team}" data-pt="2" role="spinbutton" aria-valuemin="1" aria-valuemax="3" aria-valuenow="2" aria-label="Sumar 2 puntos. Desliza a la derecha o a la izquierda para cambiar entre más uno, más dos y más tres.">
-        <span class="basket-dial__value">+2</span>
+        <span class="basket-dial__inner">
+          <span class="basket-dial__chev" aria-hidden="true">&lt;</span>
+          <span class="basket-dial__value">+2</span>
+          <span class="basket-dial__chev" aria-hidden="true">&gt;</span>
+        </span>
       </button>
-      <span class="basket-dial__peek basket-dial__peek--right" aria-hidden="true">+1</span>
     </div>`;
 }
 

@@ -30,7 +30,18 @@ import {
 } from './share.js';
 import { teamColor, teamImage, teamInitial, teamAudio, DEFAULT_COLOR_A, DEFAULT_COLOR_B } from './teamVisual.js';
 import { fileToResizedJpegImageRef, isSafeDataImageUrl, isUsableTeamImage } from './imageUtils.js';
-import { stopTeamChant, toggleTeamChant, isUsableTeamAudio, fileToAudioRef } from './audioUtils.js';
+import {
+  stopTeamChant,
+  toggleTeamChant,
+  isUsableTeamAudio,
+  fileToAudioRef,
+  resolveTeamAudioSrc,
+  startMicChantRecording,
+  stopMicChantRecording,
+  cancelMicChantRecording,
+  isMicChantRecording,
+  MAX_MIC_CHANT_MS
+} from './audioUtils.js';
 import { isIdbMediaRef, refToObjectURL, deleteMediaRef } from './mediaStore.js';
 import { showToast, showConfirm, showPlayerPicker } from './dialogs.js';
 import {
@@ -151,19 +162,15 @@ function setPageClass(name) {
   app.className = map[name] || 'page-home';
 }
 
-function applyTeamBadgeAudioChrome(slot, live, chantUrl, side) {
-  if (live && chantUrl) {
-    slot.classList.add('team-badge-slot--audio');
-    slot.setAttribute('role', 'button');
-    slot.setAttribute('tabindex', '0');
-    const labelSide = side === 'A' ? 'equipo local' : 'equipo visitante';
-    slot.setAttribute('aria-label', `Reproducir o parar cántico (${labelSide})`);
-  } else {
-    slot.classList.remove('team-badge-slot--audio');
-    slot.removeAttribute('role');
-    slot.removeAttribute('tabindex');
-    slot.removeAttribute('aria-label');
-  }
+function applyTeamBadgeAudioChrome(slot) {
+  slot.classList.remove('team-badge-slot--audio');
+  slot.removeAttribute('role');
+  slot.removeAttribute('tabindex');
+  slot.removeAttribute('aria-label');
+}
+
+function liveChantBellSvg() {
+  return `<svg class="live-chant-bell__icon" viewBox="0 0 24 24" aria-hidden="true" focusable="false"><path fill="currentColor" d="M12 22a2 2 0 0 0 2-2h-4a2 2 0 0 0 2 2zm6-6v-5c0-3.07-1.64-5.64-4.5-6.32V4a1.5 1.5 0 0 0-3 0v.68C7.63 5.36 6 7.92 6 11v5l-2 2v1h16v-1l-2-2z"/></svg>`;
 }
 
 function attachTeamBadgeSlot(slot, match, side, opts) {
@@ -177,13 +184,11 @@ function attachTeamBadgeSlot(slot, match, side, opts) {
     }
     delete slot.dataset.revokeBadgeUrl;
   }
-  const live = opts && opts.live;
   const color = teamColor(match, side);
   const url = teamImage(match, side);
   const name = side === 'A' ? match.teamA : match.teamB;
-  const chantUrl = teamAudio(match, side);
   slot.innerHTML = '';
-  applyTeamBadgeAudioChrome(slot, live, chantUrl, side);
+  applyTeamBadgeAudioChrome(slot);
 
   function renderFallback() {
     const div = document.createElement('div');
@@ -218,7 +223,7 @@ function attachTeamBadgeSlot(slot, match, side, opts) {
       if (!blobUrl) return;
       slot.dataset.revokeBadgeUrl = blobUrl;
       slot.innerHTML = '';
-      applyTeamBadgeAudioChrome(slot, live, chantUrl, side);
+      applyTeamBadgeAudioChrome(slot);
       renderImg(blobUrl);
     });
   } else {
@@ -235,6 +240,7 @@ function attachTeamBadges(match, opts) {
 
 function render() {
   stopTeamChant();
+  cancelMicChantRecording();
   const { name, id } = parseRoute();
   const app = document.getElementById('app');
   if (!app) return;
@@ -724,11 +730,7 @@ function viewLive(m) {
         <span>${sportLabel}</span>
       </div>
       <div class="broadcast-meta">${escapeHtml(formatDateES(m.date))} · ${escapeHtml(m.place || '—')}</div>
-      ${
-        teamAudio(m, 'A') || teamAudio(m, 'B')
-          ? '<p class="live-chant-hint">Toca el escudo para el cántico (un equipo a la vez).</p>'
-          : ''
-      }
+      <p class="live-chant-hint">Toca la campana sobre cada escudo para el cántico (un equipo a la vez).</p>
       <div class="game-clock-bar">
         <div class="game-clock-row">
           <span class="game-clock-label">Tiempo de juego</span>
@@ -744,7 +746,12 @@ function viewLive(m) {
       </div>
       <div class="broadcast-scores">
         <div class="team-col">
-          <div class="team-badge-slot" data-team-badge="A"></div>
+          <div class="team-badge-stack">
+            <button type="button" class="live-chant-bell" data-chant-side="A" aria-label="Reproducir cántico de ${escapeHtml(m.teamA)}">
+              ${liveChantBellSvg()}
+            </button>
+            <div class="team-badge-slot" data-team-badge="A"></div>
+          </div>
           <div class="team-name-broadcast">${escapeHtml(m.teamA)}</div>
           <div class="${isSoccer ? 'point-grid soccer' : ''}">${ptsA}</div>
         </div>
@@ -752,7 +759,12 @@ function viewLive(m) {
           ${scoreA}<span class="score-sep"> </span><span class="score-sep">—</span><span class="score-sep"> </span>${scoreB}
         </div>
         <div class="team-col">
-          <div class="team-badge-slot" data-team-badge="B"></div>
+          <div class="team-badge-stack">
+            <button type="button" class="live-chant-bell" data-chant-side="B" aria-label="Reproducir cántico de ${escapeHtml(m.teamB)}">
+              ${liveChantBellSvg()}
+            </button>
+            <div class="team-badge-slot" data-team-badge="B"></div>
+          </div>
           <div class="team-name-broadcast">${escapeHtml(m.teamB)}</div>
           <div class="${isSoccer ? 'point-grid soccer' : ''}">${ptsB}</div>
         </div>
@@ -1192,25 +1204,22 @@ function bindLive(m) {
     });
   }
 
-  app.querySelectorAll('[data-team-badge]').forEach((slot) => {
-    const side = slot.getAttribute('data-team-badge');
+  app.querySelectorAll('[data-chant-side]').forEach((btn) => {
+    const side = btn.getAttribute('data-chant-side');
     if (side !== 'A' && side !== 'B') return;
-    slot.addEventListener('click', async (e) => {
-      const cur = getMatch(m.id);
-      if (!cur) return;
-      const url = teamAudio(cur, side);
-      if (!url) return;
+    btn.addEventListener('click', async (e) => {
       e.preventDefault();
       e.stopPropagation();
-      await toggleTeamChant(side, url);
-    });
-    slot.addEventListener('keydown', async (e) => {
-      if (e.key !== 'Enter' && e.key !== ' ') return;
       const cur = getMatch(m.id);
       if (!cur) return;
       const url = teamAudio(cur, side);
-      if (!url) return;
-      e.preventDefault();
+      if (!url) {
+        const name = side === 'A' ? cur.teamA : cur.teamB;
+        showToast(`«${name}» no tiene cántico asignado. Añádelo en Configuración → Gestionar equipos.`, {
+          variant: 'info'
+        });
+        return;
+      }
       await toggleTeamChant(side, url);
     });
   });
@@ -2010,6 +2019,10 @@ function viewTeams() {
     <p class="msg">Estos equipos aparecen al crear un partido. Puedes guardar la plantilla de jugadores para asignar cada tanto en vivo. Las imágenes y el cántico (audio) se incluyen en exportación JSON.</p>
     <form class="card team-lib-form" id="form-team-lib">
       <input type="hidden" id="teamLibEditId" value="" />
+      <div id="teamLibEditBar" class="team-lib-edit-bar" hidden>
+        <span id="teamLibEditBarLabel" class="team-lib-edit-bar__label"></span>
+        <button type="button" class="btn btn-ghost btn-sm" id="teamLibCancelEdit">Cancelar edición</button>
+      </div>
       <h2 id="teamLibFormTitle">Nuevo equipo</h2>
       <div>
         <label for="teamLibName">Nombre</label>
@@ -2033,16 +2046,21 @@ function viewTeams() {
       </div>
       <div style="margin-top:12px;">
         <label for="teamLibAudioFile">Cántico o himno (opcional)</label>
-        <input type="file" id="teamLibAudioFile" accept="audio/*" />
-        <p class="preview-hint">MP3, OGG, WAV… Se guarda solo en este dispositivo. En el marcador en vivo, toca el escudo para reproducir (un equipo a la vez).</p>
+        <p class="preview-hint">Sube un archivo, graba con el micrófono o escucha la vista previa. En vivo, usa la campana sobre cada escudo.</p>
+        <div class="team-lib-audio-tools">
+          <input type="file" id="teamLibAudioFile" accept="audio/*" class="team-lib-audio-file" />
+          <button type="button" class="btn btn-ghost" id="teamLibRecordAudio">Grabar con micrófono</button>
+          <button type="button" class="btn btn-ghost" id="teamLibStopRecord" hidden>Detener grabación</button>
+        </div>
+        <p id="teamLibRecordStatus" class="team-lib-record-status" hidden aria-live="polite"></p>
       </div>
       <div class="preview-row team-lib-audio-row">
         <span id="teamLibAudioStatus" class="team-lib-audio-status" aria-live="polite"></span>
+        <button type="button" class="btn btn-ghost" id="teamLibPlayAudio" hidden style="min-height:44px;">Escuchar</button>
         <button type="button" class="btn btn-ghost" id="teamLibClearAudio" style="min-height:44px;">Quitar audio</button>
       </div>
       <div class="team-lib-form-actions">
         <button type="submit" class="btn btn-primary" id="teamLibSubmit">Guardar equipo</button>
-        <button type="button" class="btn btn-ghost" id="teamLibCancelEdit" hidden>Cancelar edición</button>
       </div>
     </form>
     <h2 class="team-lib-list-title">Tu plantilla</h2>
@@ -2058,11 +2076,78 @@ function bindTeams() {
   const app = document.getElementById('app');
   let pendingImage = null;
   let pendingAudio = null;
+  let previewAudioEl = null;
+  let previewAudioBlobUrl = null;
+  let recordMaxTimer = null;
+
+  function stopTeamLibPreview() {
+    if (previewAudioEl) {
+      try {
+        previewAudioEl.pause();
+        previewAudioEl.removeAttribute('src');
+        previewAudioEl.load();
+      } catch {
+        /* ignore */
+      }
+      previewAudioEl = null;
+    }
+    if (previewAudioBlobUrl) {
+      try {
+        URL.revokeObjectURL(previewAudioBlobUrl);
+      } catch {
+        /* ignore */
+      }
+      previewAudioBlobUrl = null;
+    }
+  }
+
+  function setRecordingUi(active, statusText) {
+    const btnRec = app.querySelector('#teamLibRecordAudio');
+    const btnStop = app.querySelector('#teamLibStopRecord');
+    const statusEl = app.querySelector('#teamLibRecordStatus');
+    if (btnRec) btnRec.hidden = active;
+    if (btnStop) btnStop.hidden = !active;
+    if (statusEl) {
+      if (active && statusText) {
+        statusEl.hidden = false;
+        statusEl.textContent = statusText;
+        statusEl.classList.add('team-lib-record-status--active');
+      } else {
+        statusEl.hidden = true;
+        statusEl.textContent = '';
+        statusEl.classList.remove('team-lib-record-status--active');
+      }
+    }
+  }
+
+  function clearRecordTimer() {
+    if (recordMaxTimer) {
+      clearTimeout(recordMaxTimer);
+      recordMaxTimer = null;
+    }
+  }
+
+  function stopMicRecordingUi() {
+    clearRecordTimer();
+    if (isMicChantRecording()) cancelMicChantRecording();
+    setRecordingUi(false);
+  }
+
+  function setEditMode(editing, teamName) {
+    const bar = app.querySelector('#teamLibEditBar');
+    const label = app.querySelector('#teamLibEditBarLabel');
+    const title = app.querySelector('#teamLibFormTitle');
+    if (bar) bar.hidden = !editing;
+    if (label && editing) label.textContent = `Editando: ${teamName || 'equipo'}`;
+    if (title) title.textContent = editing ? 'Editar equipo' : 'Nuevo equipo';
+    app.querySelector('#teamLibSubmit').textContent = editing ? 'Guardar cambios' : 'Guardar equipo';
+  }
 
   function updateAudioStatus() {
     const el = app.querySelector('#teamLibAudioStatus');
-    if (!el) return;
-    el.textContent = pendingAudio ? 'Cántico asignado' : '';
+    const playBtn = app.querySelector('#teamLibPlayAudio');
+    if (el) el.textContent = pendingAudio ? 'Cántico asignado' : '';
+    if (playBtn) playBtn.hidden = !pendingAudio;
   }
 
   function fakeMatchForPreview(name, color, image) {
@@ -2104,6 +2189,9 @@ function bindTeams() {
   });
 
   function resetForm() {
+    stopTeamLibPreview();
+    stopTeamChant();
+    stopMicRecordingUi();
     const editId = app.querySelector('#teamLibEditId')?.value?.trim();
     const orig = editId ? getSavedTeam(editId) : null;
     const origImg = orig && orig.image != null ? orig.image : null;
@@ -2119,10 +2207,8 @@ function bindTeams() {
     app.querySelector('#teamLibFile').value = '';
     const af = app.querySelector('#teamLibAudioFile');
     if (af) af.value = '';
+    setEditMode(false);
     updateAudioStatus();
-    app.querySelector('#teamLibFormTitle').textContent = 'Nuevo equipo';
-    app.querySelector('#teamLibSubmit').textContent = 'Guardar equipo';
-    app.querySelector('#teamLibCancelEdit').hidden = true;
     refreshLibPreview();
   }
 
@@ -2149,17 +2235,84 @@ function bindTeams() {
   app.querySelector('#teamLibAudioFile').addEventListener('change', async (e) => {
     const f = e.target.files && e.target.files[0];
     if (!f) return;
+    stopMicRecordingUi();
+    stopTeamLibPreview();
     try {
       if (isIdbMediaRef(pendingAudio)) void deleteMediaRef(pendingAudio);
       pendingAudio = await fileToAudioRef(f);
       updateAudioStatus();
+      showToast('Cántico cargado', { variant: 'success' });
     } catch (err) {
       showToast(err.message || 'No se pudo cargar el audio', { variant: 'error' });
       e.target.value = '';
     }
   });
 
+  app.querySelector('#teamLibRecordAudio').onclick = async () => {
+    stopTeamLibPreview();
+    stopTeamChant();
+    try {
+      await startMicChantRecording();
+      setRecordingUi(true, 'Grabando… Toca «Detener grabación» (máx. 45 s).');
+      clearRecordTimer();
+      recordMaxTimer = window.setTimeout(() => {
+        if (isMicChantRecording()) app.querySelector('#teamLibStopRecord')?.click();
+      }, MAX_MIC_CHANT_MS);
+    } catch (err) {
+      showToast(err.message || 'No se pudo iniciar la grabación', { variant: 'error' });
+    }
+  };
+
+  app.querySelector('#teamLibStopRecord').onclick = async () => {
+    if (!isMicChantRecording()) {
+      setRecordingUi(false);
+      return;
+    }
+    clearRecordTimer();
+    setRecordingUi(true, 'Guardando grabación…');
+    try {
+      if (isIdbMediaRef(pendingAudio)) void deleteMediaRef(pendingAudio);
+      pendingAudio = await stopMicChantRecording();
+      const af = app.querySelector('#teamLibAudioFile');
+      if (af) af.value = '';
+      updateAudioStatus();
+      showToast('Grabación lista. Escúchala antes de guardar el equipo.', { variant: 'success' });
+    } catch (err) {
+      showToast(err.message || 'No se pudo guardar la grabación', { variant: 'error' });
+    } finally {
+      setRecordingUi(false);
+    }
+  };
+
+  app.querySelector('#teamLibPlayAudio').onclick = async () => {
+    if (!pendingAudio) return;
+    stopTeamLibPreview();
+    stopTeamChant();
+    const src = await resolveTeamAudioSrc(pendingAudio);
+    if (!src) {
+      showToast('No se pudo cargar el audio', { variant: 'error' });
+      return;
+    }
+    if (isIdbMediaRef(pendingAudio)) previewAudioBlobUrl = src;
+    const el = new Audio(src);
+    previewAudioEl = el;
+    el.addEventListener('ended', stopTeamLibPreview);
+    el.addEventListener('error', () => {
+      showToast('No se pudo reproducir el audio', { variant: 'error' });
+      stopTeamLibPreview();
+    });
+    const p = el.play();
+    if (p && typeof p.catch === 'function') {
+      p.catch(() => {
+        showToast('No se pudo reproducir (revisa el volumen)', { variant: 'error' });
+        stopTeamLibPreview();
+      });
+    }
+  };
+
   app.querySelector('#teamLibClearAudio').onclick = () => {
+    stopTeamLibPreview();
+    stopMicRecordingUi();
     if (isIdbMediaRef(pendingAudio)) void deleteMediaRef(pendingAudio);
     pendingAudio = null;
     const af = app.querySelector('#teamLibAudioFile');
@@ -2210,13 +2363,19 @@ function bindTeams() {
     render();
   });
 
-  app.querySelector('#teamLibCancelEdit').onclick = () => resetForm();
+  app.querySelector('#teamLibCancelEdit').onclick = () => {
+    resetForm();
+    showToast('Edición cancelada', { variant: 'info' });
+    app.querySelector('#form-team-lib')?.scrollIntoView({ behavior: 'smooth', block: 'start' });
+  };
 
   app.querySelectorAll('[data-edit-team]').forEach((btn) => {
     btn.addEventListener('click', () => {
       const id = btn.getAttribute('data-edit-team');
       const t = getSavedTeam(id);
       if (!t) return;
+      stopTeamLibPreview();
+      stopMicRecordingUi();
       const prevEditId = app.querySelector('#teamLibEditId')?.value?.trim();
       const prevTeam = prevEditId ? getSavedTeam(prevEditId) : null;
       if (isIdbMediaRef(pendingImage)) {
@@ -2236,11 +2395,10 @@ function bindTeams() {
       app.querySelector('#teamLibFile').value = '';
       const af = app.querySelector('#teamLibAudioFile');
       if (af) af.value = '';
+      setEditMode(true, t.name);
       updateAudioStatus();
-      app.querySelector('#teamLibFormTitle').textContent = 'Editar equipo';
-      app.querySelector('#teamLibSubmit').textContent = 'Guardar cambios';
-      app.querySelector('#teamLibCancelEdit').hidden = false;
       refreshLibPreview();
+      app.querySelector('#form-team-lib')?.scrollIntoView({ behavior: 'smooth', block: 'start' });
       app.querySelector('#teamLibName').focus();
     });
   });

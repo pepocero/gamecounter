@@ -60,6 +60,152 @@ export function fileToAudioRef(file) {
   });
 }
 
+/** Guarda un Blob de audio (p. ej. grabación de micrófono) en IndexedDB. */
+export function blobToAudioRef(blob) {
+  return new Promise((resolve, reject) => {
+    if (!(blob instanceof Blob) || blob.size === 0) {
+      reject(new Error('Grabación vacía'));
+      return;
+    }
+    if (blob.size > MAX_AUDIO_FILE_BYTES) {
+      reject(new Error('La grabación es demasiado grande (máx. 5 MB).'));
+      return;
+    }
+    putMediaBlob(blob)
+      .then((ref) => resolve(ref))
+      .catch((e) => reject(e instanceof Error ? e : new Error('No se pudo guardar la grabación')));
+  });
+}
+
+/** Duración máxima de grabación con micrófono (ms). */
+export const MAX_MIC_CHANT_MS = 45_000;
+
+export async function resolveTeamAudioSrc(dataUrlOrRef) {
+  if (typeof dataUrlOrRef !== 'string' || !isUsableTeamAudio(dataUrlOrRef)) return null;
+  if (isIdbMediaRef(dataUrlOrRef)) return refToObjectURL(dataUrlOrRef);
+  return dataUrlOrRef;
+}
+
+const MIC_MIME_CANDIDATES = [
+  'audio/webm;codecs=opus',
+  'audio/webm',
+  'audio/mp4',
+  'audio/ogg;codecs=opus',
+  'audio/ogg',
+  ''
+];
+
+let micStream = null;
+let micRecorder = null;
+let micChunks = [];
+
+function pickRecorderMime() {
+  if (typeof MediaRecorder === 'undefined') return '';
+  for (const mime of MIC_MIME_CANDIDATES) {
+    if (!mime || MediaRecorder.isTypeSupported(mime)) return mime;
+  }
+  return '';
+}
+
+function releaseMicStream() {
+  if (micStream) {
+    micStream.getTracks().forEach((t) => {
+      try {
+        t.stop();
+      } catch {
+        /* ignore */
+      }
+    });
+    micStream = null;
+  }
+}
+
+export function isMicChantRecording() {
+  return micRecorder != null && micRecorder.state === 'recording';
+}
+
+export function cancelMicChantRecording() {
+  if (micRecorder && micRecorder.state !== 'inactive') {
+    try {
+      micRecorder.stop();
+    } catch {
+      /* ignore */
+    }
+  }
+  micRecorder = null;
+  micChunks = [];
+  releaseMicStream();
+}
+
+export async function startMicChantRecording() {
+  if (isMicChantRecording()) {
+    throw new Error('Ya hay una grabación en curso');
+  }
+  if (!navigator.mediaDevices?.getUserMedia) {
+    throw new Error('Este dispositivo no permite usar el micrófono');
+  }
+  if (typeof MediaRecorder === 'undefined') {
+    throw new Error('Tu navegador no soporta grabar audio');
+  }
+  cancelMicChantRecording();
+  const mime = pickRecorderMime();
+  let stream;
+  try {
+    stream = await navigator.mediaDevices.getUserMedia({ audio: true });
+  } catch {
+    throw new Error('No se pudo acceder al micrófono. Revisa los permisos del navegador.');
+  }
+  micStream = stream;
+  micChunks = [];
+  const rec = mime ? new MediaRecorder(stream, { mimeType: mime }) : new MediaRecorder(stream);
+  micRecorder = rec;
+  rec.ondataavailable = (e) => {
+    if (e.data && e.data.size > 0) micChunks.push(e.data);
+  };
+  return new Promise((resolve, reject) => {
+    rec.onerror = () => {
+      cancelMicChantRecording();
+      reject(new Error('Error durante la grabación'));
+    };
+    rec.onstart = () => resolve(rec.mimeType || mime || 'audio/webm');
+    try {
+      rec.start(200);
+    } catch (e) {
+      cancelMicChantRecording();
+      reject(e instanceof Error ? e : new Error('No se pudo iniciar la grabación'));
+    }
+  });
+}
+
+export function stopMicChantRecording() {
+  if (!micRecorder || micRecorder.state === 'inactive') {
+    cancelMicChantRecording();
+    return Promise.reject(new Error('No hay grabación activa'));
+  }
+  return new Promise((resolve, reject) => {
+    const rec = micRecorder;
+    rec.onstop = async () => {
+      const type = rec.mimeType || (micChunks[0] && micChunks[0].type) || 'audio/webm';
+      const blob = new Blob(micChunks, { type });
+      micRecorder = null;
+      micChunks = [];
+      releaseMicStream();
+      try {
+        const ref = await blobToAudioRef(blob);
+        resolve(ref);
+      } catch (e) {
+        reject(e instanceof Error ? e : new Error('No se pudo guardar la grabación'));
+      }
+    };
+    try {
+      rec.stop();
+    } catch (e) {
+      cancelMicChantRecording();
+      reject(e instanceof Error ? e : new Error('No se pudo detener la grabación'));
+    }
+  });
+}
+
 let currentAudio = null;
 let currentSide = null;
 let currentAudioBlobUrl = null;

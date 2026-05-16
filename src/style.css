@@ -1806,6 +1806,90 @@ button.stat-box {
   pointer-events: none;
 }
 
+[hidden] {
+  display: none !important;
+}
+
+.team-lib-edit-bar {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+  margin-bottom: 14px;
+  padding: 10px 12px;
+  border-radius: 10px;
+  background: rgba(201, 162, 39, 0.12);
+  border: 1px solid rgba(201, 162, 39, 0.35);
+}
+
+.team-lib-edit-bar__label {
+  font-size: 0.95rem;
+  font-weight: 600;
+  color: var(--gold);
+}
+
+.team-lib-audio-tools {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  align-items: center;
+  margin-top: 8px;
+}
+
+.team-lib-audio-file {
+  flex: 1 1 160px;
+  min-width: 0;
+}
+
+.team-lib-record-status {
+  margin: 8px 0 0;
+  font-size: 0.88rem;
+  color: var(--muted);
+}
+
+.team-lib-record-status--active {
+  color: #fbbf24;
+}
+
+.team-badge-stack {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 6px;
+}
+
+.live-chant-bell {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 40px;
+  height: 40px;
+  padding: 0;
+  border: none;
+  border-radius: 50%;
+  background: rgba(201, 162, 39, 0.2);
+  color: #fbbf24;
+  cursor: pointer;
+  -webkit-tap-highlight-color: transparent;
+  box-shadow: 0 2px 10px rgba(0, 0, 0, 0.35);
+}
+
+.live-chant-bell:hover {
+  background: rgba(201, 162, 39, 0.35);
+}
+
+.live-chant-bell:focus-visible {
+  outline: 2px solid rgba(251, 191, 36, 0.7);
+  outline-offset: 2px;
+}
+
+.live-chant-bell__icon {
+  width: 22px;
+  height: 22px;
+  display: block;
+}
+
 .team-lib-form h2 {
   margin: 0 0 14px;
   font-size: 1.1rem;
@@ -2155,6 +2239,17 @@ html[data-theme='light'] .score-mega {
 
 html[data-theme='light'] .team-name-broadcast {
   color: var(--text);
+}
+
+html[data-theme='light'] .team-lib-edit-bar {
+  background: rgba(201, 162, 39, 0.1);
+  border-color: rgba(180, 140, 20, 0.35);
+}
+
+html[data-theme='light'] .live-chant-bell {
+  background: rgba(201, 162, 39, 0.18);
+  color: #b8860b;
+  box-shadow: 0 2px 8px rgba(0, 0, 0, 0.12);
 }
 
 html[data-theme='light'] .live-chant-hint {

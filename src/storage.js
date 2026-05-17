@@ -1,4 +1,4 @@
-import { isSafeTeamAudioDataUrl } from './audioUtils.js';
+import { isSafeTeamAudioDataUrl, isUsableTeamAudio } from './audioUtils.js';
 import { isSafeDataImageUrl } from './imageUtils.js';
 import {
   isIdbMediaRef,
@@ -175,6 +175,40 @@ export function getSavedTeam(id) {
   return loadSavedTeams().find((t) => t.id === id) ?? null;
 }
 
+/** Busca equipo guardado por nombre (sin distinguir mayúsculas). */
+export function findSavedTeamByName(name) {
+  const n = String(name || '').trim().toLowerCase();
+  if (!n) return null;
+  return loadSavedTeams().find((t) => String(t.name || '').trim().toLowerCase() === n) ?? null;
+}
+
+/**
+ * Propaga el cántico del equipo guardado a partidos que lo referencian por id.
+ * @returns {number} partidos actualizados
+ */
+export function syncSavedTeamChantToMatches(team) {
+  if (!team || typeof team.id !== 'string' || !team.id.trim()) return 0;
+  const audio = team.audio && isUsableTeamAudio(team.audio) ? team.audio : null;
+  const list = loadMatches();
+  let updated = 0;
+  for (const m of list) {
+    let changed = false;
+    if (m.savedTeamIdA === team.id && m.teamAAudio !== audio) {
+      m.teamAAudio = audio;
+      changed = true;
+    }
+    if (m.savedTeamIdB === team.id && m.teamBAudio !== audio) {
+      m.teamBAudio = audio;
+      changed = true;
+    }
+    if (changed) {
+      saveMatch(m);
+      updated += 1;
+    }
+  }
+  return updated;
+}
+
 /**
  * Borra todos los partidos y equipos guardados en este dispositivo (localStorage).
  * También vacía multimedia en IndexedDB y limpia marcas auxiliares en sessionStorage. Irreversible.
@@ -288,6 +322,8 @@ function validateMatchRaw(m) {
     if (typeof m.teamBAudio !== 'string') return false;
     if (!isSafeTeamAudioDataUrl(m.teamBAudio) && !isIdbMediaRef(m.teamBAudio)) return false;
   }
+  if (m.savedTeamIdA != null && typeof m.savedTeamIdA !== 'string') return false;
+  if (m.savedTeamIdB != null && typeof m.savedTeamIdB !== 'string') return false;
   return true;
 }
 

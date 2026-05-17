@@ -16,6 +16,8 @@ import {
   saveSavedTeam,
   deleteSavedTeam,
   getSavedTeam,
+  findSavedTeamByName,
+  syncSavedTeamChantToMatches,
   buildExportPayload,
   applyImportPayload,
   deleteMatch,
@@ -28,7 +30,14 @@ import {
   shareMatch,
   downloadImageBlob
 } from './share.js';
-import { teamColor, teamImage, teamInitial, teamAudio, DEFAULT_COLOR_A, DEFAULT_COLOR_B } from './teamVisual.js';
+import {
+  teamColor,
+  teamImage,
+  teamInitial,
+  resolveMatchTeamChant,
+  DEFAULT_COLOR_A,
+  DEFAULT_COLOR_B
+} from './teamVisual.js';
 import { fileToResizedJpegImageRef, isSafeDataImageUrl, isUsableTeamImage } from './imageUtils.js';
 import {
   stopTeamChant,
@@ -488,7 +497,14 @@ function viewNew() {
 
 function bindNew() {
   const app = document.getElementById('app');
-  const pending = { teamAImage: null, teamBImage: null, teamAAudio: null, teamBAudio: null };
+  const pending = {
+    teamAImage: null,
+    teamBImage: null,
+    teamAAudio: null,
+    teamBAudio: null,
+    savedTeamIdA: null,
+    savedTeamIdB: null
+  };
 
   function getPreviewMatch() {
     return {
@@ -523,6 +539,7 @@ function bindNew() {
       if (isIdbMediaRef(pending.teamAAudio) && pending.teamAAudio !== nextAud) void deleteMediaRef(pending.teamAAudio);
       pending.teamAImage = nextImg;
       pending.teamAAudio = nextAud;
+      pending.savedTeamIdA = t.id;
       app.querySelector('#fileTeamA').value = '';
       app.querySelector('#rosterALines').value = rosterLines;
     } else {
@@ -534,6 +551,7 @@ function bindNew() {
       if (isIdbMediaRef(pending.teamBAudio) && pending.teamBAudio !== nextAud) void deleteMediaRef(pending.teamBAudio);
       pending.teamBImage = nextImg;
       pending.teamBAudio = nextAud;
+      pending.savedTeamIdB = t.id;
       app.querySelector('#fileTeamB').value = '';
       app.querySelector('#rosterBLines').value = rosterLines;
     }
@@ -544,12 +562,18 @@ function bindNew() {
   app.querySelector('#savedPickA').addEventListener('change', (e) => {
     const v = e.target.value;
     if (v) applySavedTeam('A', v);
-    else pending.teamAAudio = null;
+    else {
+      pending.teamAAudio = null;
+      pending.savedTeamIdA = null;
+    }
   });
   app.querySelector('#savedPickB').addEventListener('change', (e) => {
     const v = e.target.value;
     if (v) applySavedTeam('B', v);
-    else pending.teamBAudio = null;
+    else {
+      pending.teamBAudio = null;
+      pending.savedTeamIdB = null;
+    }
   });
 
   app.querySelector('#fileTeamA').onchange = async (e) => {
@@ -642,6 +666,8 @@ function bindNew() {
       teamBImage: pending.teamBImage && isUsableTeamImage(pending.teamBImage) ? pending.teamBImage : null,
       teamAAudio: pending.teamAAudio && isUsableTeamAudio(pending.teamAAudio) ? pending.teamAAudio : null,
       teamBAudio: pending.teamBAudio && isUsableTeamAudio(pending.teamBAudio) ? pending.teamBAudio : null,
+      savedTeamIdA: pending.savedTeamIdA || null,
+      savedTeamIdB: pending.savedTeamIdB || null,
       date,
       place,
       rosterA,
@@ -1212,12 +1238,16 @@ function bindLive(m) {
       e.stopPropagation();
       const cur = getMatch(m.id);
       if (!cur) return;
-      const url = teamAudio(cur, side);
+      const url = resolveMatchTeamChant(cur, side, {
+        getSavedTeam,
+        findSavedTeamByName
+      });
       if (!url) {
         const name = side === 'A' ? cur.teamA : cur.teamB;
-        showToast(`«${name}» no tiene cántico asignado. Añádelo en Configuración → Gestionar equipos.`, {
-          variant: 'info'
-        });
+        showToast(
+          `«${name}» no tiene cántico. Grábalo en Configuración → Equipos guardados y pulsa «Guardar cambios» (o crea el partido eligiendo ese equipo en «Usar equipo guardado»).`,
+          { variant: 'info' }
+        );
         return;
       }
       await toggleTeamChant(side, url);
@@ -2057,7 +2087,12 @@ function viewTeams() {
       <div class="preview-row team-lib-audio-row">
         <span id="teamLibAudioStatus" class="team-lib-audio-status" aria-live="polite"></span>
         <button type="button" class="btn btn-ghost" id="teamLibPlayAudio" hidden style="min-height:44px;">Escuchar</button>
+        <button type="button" class="btn btn-ghost" id="teamLibStopPreview" hidden style="min-height:44px;">Parar</button>
         <button type="button" class="btn btn-ghost" id="teamLibClearAudio" style="min-height:44px;">Quitar audio</button>
+      </div>
+      <div class="team-lib-audio-player" id="teamLibAudioPlayer" hidden>
+        <input type="range" id="teamLibAudioSeek" class="team-lib-audio-seek" min="0" max="1000" value="0" step="1" aria-label="Posición de reproducción" />
+        <span id="teamLibAudioTime" class="team-lib-audio-time">0:00 / 0:00</span>
       </div>
       <div class="team-lib-form-actions">
         <button type="submit" class="btn btn-primary" id="teamLibSubmit">Guardar equipo</button>
@@ -2078,9 +2113,35 @@ function bindTeams() {
   let pendingAudio = null;
   let previewAudioEl = null;
   let previewAudioBlobUrl = null;
+  let previewPlaying = false;
+  let previewSeeking = false;
   let recordMaxTimer = null;
 
+  function formatAudioTime(sec) {
+    if (!Number.isFinite(sec) || sec < 0) return '0:00';
+    const s = Math.floor(sec);
+    const m = Math.floor(s / 60);
+    const r = s % 60;
+    return `${m}:${String(r).padStart(2, '0')}`;
+  }
+
+  function updatePreviewProgress() {
+    const el = previewAudioEl;
+    const seek = app.querySelector('#teamLibAudioSeek');
+    const timeEl = app.querySelector('#teamLibAudioTime');
+    if (!el || !seek || !timeEl) return;
+    const dur = el.duration;
+    const cur = el.currentTime;
+    if (Number.isFinite(dur) && dur > 0) {
+      if (!previewSeeking) seek.value = String(Math.round((cur / dur) * 1000));
+      timeEl.textContent = `${formatAudioTime(cur)} / ${formatAudioTime(dur)}`;
+    } else {
+      timeEl.textContent = `${formatAudioTime(cur)} / —`;
+    }
+  }
+
   function stopTeamLibPreview() {
+    previewPlaying = false;
     if (previewAudioEl) {
       try {
         previewAudioEl.pause();
@@ -2099,6 +2160,9 @@ function bindTeams() {
       }
       previewAudioBlobUrl = null;
     }
+    const seek = app.querySelector('#teamLibAudioSeek');
+    if (seek) seek.value = '0';
+    updateAudioStatus();
   }
 
   function setRecordingUi(active, statusText) {
@@ -2146,8 +2210,44 @@ function bindTeams() {
   function updateAudioStatus() {
     const el = app.querySelector('#teamLibAudioStatus');
     const playBtn = app.querySelector('#teamLibPlayAudio');
-    if (el) el.textContent = pendingAudio ? 'Cántico asignado' : '';
-    if (playBtn) playBtn.hidden = !pendingAudio;
+    const stopBtn = app.querySelector('#teamLibStopPreview');
+    const player = app.querySelector('#teamLibAudioPlayer');
+    const editId = app.querySelector('#teamLibEditId')?.value?.trim();
+    if (el) {
+      if (!pendingAudio) el.textContent = '';
+      else if (editId) el.textContent = 'Cántico listo (se guarda al detener la grabación o al pulsar «Guardar cambios»)';
+      else el.textContent = 'Cántico listo — pulsa «Guardar equipo» para conservarlo';
+    }
+    if (playBtn) {
+      playBtn.hidden = !pendingAudio;
+      playBtn.textContent = previewPlaying ? 'Pausar' : 'Escuchar';
+    }
+    if (stopBtn) stopBtn.hidden = !previewPlaying;
+    if (player) player.hidden = !pendingAudio;
+    if (!pendingAudio) {
+      const timeEl = app.querySelector('#teamLibAudioTime');
+      if (timeEl) timeEl.textContent = '0:00 / 0:00';
+    }
+  }
+
+  /** Persiste el cántico en el equipo guardado y lo propaga a partidos vinculados. */
+  function persistTeamChantToLibrary(audioRef) {
+    const editId = app.querySelector('#teamLibEditId')?.value?.trim();
+    if (!editId || !audioRef || !isUsableTeamAudio(audioRef)) return false;
+    const prev = getSavedTeam(editId);
+    if (!prev) return false;
+    if (prev.audio && prev.audio !== audioRef && isIdbMediaRef(prev.audio)) void deleteMediaRef(prev.audio);
+    const updated = { ...prev, audio: audioRef };
+    try {
+      saveSavedTeam(updated);
+      syncSavedTeamChantToMatches(updated);
+      return true;
+    } catch (e) {
+      if (e instanceof StorageQuotaError) {
+        showToast('No hay espacio para guardar el cántico en el equipo.', { variant: 'error' });
+      }
+      return false;
+    }
   }
 
   function fakeMatchForPreview(name, color, image) {
@@ -2241,7 +2341,11 @@ function bindTeams() {
       if (isIdbMediaRef(pendingAudio)) void deleteMediaRef(pendingAudio);
       pendingAudio = await fileToAudioRef(f);
       updateAudioStatus();
-      showToast('Cántico cargado', { variant: 'success' });
+      if (persistTeamChantToLibrary(pendingAudio)) {
+        showToast('Cántico guardado en el equipo', { variant: 'success' });
+      } else {
+        showToast('Cántico cargado', { variant: 'success' });
+      }
     } catch (err) {
       showToast(err.message || 'No se pudo cargar el audio', { variant: 'error' });
       e.target.value = '';
@@ -2276,7 +2380,12 @@ function bindTeams() {
       const af = app.querySelector('#teamLibAudioFile');
       if (af) af.value = '';
       updateAudioStatus();
-      showToast('Grabación lista. Escúchala antes de guardar el equipo.', { variant: 'success' });
+      const editId = app.querySelector('#teamLibEditId')?.value?.trim();
+      if (editId && persistTeamChantToLibrary(pendingAudio)) {
+        showToast('Cántico guardado en el equipo. Ya puedes usarlo en el partido (campana).', { variant: 'success' });
+      } else {
+        showToast('Grabación lista. Pulsa «Guardar equipo» para conservar el cántico.', { variant: 'success' });
+      }
     } catch (err) {
       showToast(err.message || 'No se pudo guardar la grabación', { variant: 'error' });
     } finally {
@@ -2286,8 +2395,25 @@ function bindTeams() {
 
   app.querySelector('#teamLibPlayAudio').onclick = async () => {
     if (!pendingAudio) return;
-    stopTeamLibPreview();
     stopTeamChant();
+    if (previewAudioEl) {
+      if (previewPlaying) {
+        previewAudioEl.pause();
+        previewPlaying = false;
+        updateAudioStatus();
+        return;
+      }
+      const p = previewAudioEl.play();
+      previewPlaying = true;
+      updateAudioStatus();
+      if (p && typeof p.catch === 'function') {
+        p.catch(() => {
+          showToast('No se pudo reproducir (revisa el volumen)', { variant: 'error' });
+          stopTeamLibPreview();
+        });
+      }
+      return;
+    }
     const src = await resolveTeamAudioSrc(pendingAudio);
     if (!src) {
       showToast('No se pudo cargar el audio', { variant: 'error' });
@@ -2297,10 +2423,14 @@ function bindTeams() {
     const el = new Audio(src);
     previewAudioEl = el;
     el.addEventListener('ended', stopTeamLibPreview);
+    el.addEventListener('timeupdate', updatePreviewProgress);
+    el.addEventListener('loadedmetadata', updatePreviewProgress);
     el.addEventListener('error', () => {
       showToast('No se pudo reproducir el audio', { variant: 'error' });
       stopTeamLibPreview();
     });
+    previewPlaying = true;
+    updateAudioStatus();
     const p = el.play();
     if (p && typeof p.catch === 'function') {
       p.catch(() => {
@@ -2310,6 +2440,22 @@ function bindTeams() {
     }
   };
 
+  app.querySelector('#teamLibStopPreview').onclick = () => stopTeamLibPreview();
+
+  const seekInput = app.querySelector('#teamLibAudioSeek');
+  if (seekInput) {
+    seekInput.addEventListener('input', () => {
+      previewSeeking = true;
+      const el = previewAudioEl;
+      if (!el || !Number.isFinite(el.duration) || el.duration <= 0) return;
+      el.currentTime = (Number(seekInput.value) / 1000) * el.duration;
+      updatePreviewProgress();
+    });
+    seekInput.addEventListener('change', () => {
+      previewSeeking = false;
+    });
+  }
+
   app.querySelector('#teamLibClearAudio').onclick = () => {
     stopTeamLibPreview();
     stopMicRecordingUi();
@@ -2317,6 +2463,20 @@ function bindTeams() {
     pendingAudio = null;
     const af = app.querySelector('#teamLibAudioFile');
     if (af) af.value = '';
+    const editId = app.querySelector('#teamLibEditId')?.value?.trim();
+    if (editId) {
+      const prev = getSavedTeam(editId);
+      if (prev) {
+        if (prev.audio && isIdbMediaRef(prev.audio)) void deleteMediaRef(prev.audio);
+        const updated = { ...prev, audio: null };
+        try {
+          saveSavedTeam(updated);
+          syncSavedTeamChantToMatches(updated);
+        } catch {
+          /* ignore */
+        }
+      }
+    }
     updateAudioStatus();
   };
 
@@ -2349,6 +2509,15 @@ function bindTeams() {
     };
     try {
       saveSavedTeam(team);
+      const synced = syncSavedTeamChantToMatches(team);
+      if (audio && synced > 0) {
+        showToast(
+          editId ? `Equipo actualizado. Cántico aplicado a ${synced} partido(s).` : 'Equipo guardado',
+          { variant: 'success' }
+        );
+      } else {
+        showToast(editId ? 'Equipo actualizado' : 'Equipo guardado', { variant: 'success' });
+      }
     } catch (e) {
       if (e instanceof StorageQuotaError) {
         showToast(
@@ -2359,7 +2528,6 @@ function bindTeams() {
       }
       throw e;
     }
-    showToast(editId ? 'Equipo actualizado' : 'Equipo guardado', { variant: 'success' });
     render();
   });
 

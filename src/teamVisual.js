@@ -25,6 +25,24 @@ export function teamAudio(match, side) {
   return v;
 }
 
+/** Cántico del partido o, si falta, el del equipo guardado vinculado o con el mismo nombre. */
+export function resolveMatchTeamChant(match, side, { getSavedTeam, findSavedTeamByName } = {}) {
+  const direct = teamAudio(match, side);
+  if (direct) return direct;
+  const idKey = side === 'A' ? 'savedTeamIdA' : 'savedTeamIdB';
+  const savedId = match[idKey];
+  if (typeof savedId === 'string' && savedId.trim() && typeof getSavedTeam === 'function') {
+    const t = getSavedTeam(savedId.trim());
+    if (t?.audio && isUsableTeamAudio(t.audio)) return t.audio;
+  }
+  const name = side === 'A' ? match.teamA : match.teamB;
+  if (typeof findSavedTeamByName === 'function') {
+    const t = findSavedTeamByName(name);
+    if (t?.audio && isUsableTeamAudio(t.audio)) return t.audio;
+  }
+  return null;
+}
+
 export function teamInitial(name) {
   const s = String(name || '').trim();
   if (!s) return '?';

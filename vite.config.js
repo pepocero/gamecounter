@@ -11,34 +11,46 @@ export default defineConfig({
   plugins: [
     VitePWA({
       registerType: 'prompt',
-      includeAssets: ['icon.svg'],
+      devOptions: {
+        enabled: true
+      },
+      includeAssets: ['icon.svg', 'apple-touch-icon.png', 'pwa-192x192.png', 'pwa-512x512.png'],
       manifest: {
         name: 'GameScore',
         short_name: 'GameScore',
-        description: 'Registro de puntajes para fútbol y baloncesto',
+        description: 'Marcador de fútbol y baloncesto — funciona sin conexión',
         theme_color: '#0a1628',
         background_color: '#060b12',
         display: 'standalone',
         orientation: 'portrait',
         start_url: '/',
         scope: '/',
+        lang: 'es',
+        dir: 'ltr',
+        categories: ['sports', 'utilities'],
         icons: [
           {
-            src: '/icon.svg',
-            sizes: 'any',
-            type: 'image/svg+xml',
+            src: '/pwa-192x192.png',
+            sizes: '192x192',
+            type: 'image/png',
             purpose: 'any'
           },
           {
-            src: '/icon.svg',
-            sizes: 'any',
-            type: 'image/svg+xml',
+            src: '/pwa-512x512.png',
+            sizes: '512x512',
+            type: 'image/png',
+            purpose: 'any'
+          },
+          {
+            src: '/pwa-512x512.png',
+            sizes: '512x512',
+            type: 'image/png',
             purpose: 'maskable'
           }
         ]
       },
       workbox: {
-        globPatterns: ['**/*.{js,css,html,ico,svg,woff2}'],
+        globPatterns: ['**/*.{js,css,html,ico,svg,png,woff2}'],
         cleanupOutdatedCaches: true,
         /** Nuevo id de caché por versión para que el SW de la PWA detecte actualización */
         cacheId: `gamescore-${pkg.version}`

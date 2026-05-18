@@ -532,26 +532,86 @@ textarea {
   text-align: center;
 }
 
-.team-lib-audio-row {
+.team-lib-chant-block {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+  margin-top: 12px;
+  padding: 14px;
+  border-radius: 12px;
+  background: rgba(255, 255, 255, 0.04);
+  border: 1px solid rgba(255, 255, 255, 0.08);
+}
+
+.team-lib-audio-status {
+  margin: 0;
+  width: 100%;
+  font-size: 0.88rem;
+  line-height: 1.45;
+  color: rgba(255, 255, 255, 0.6);
+}
+
+.media-toolbar {
+  display: flex;
+  flex-wrap: wrap;
   align-items: center;
   gap: 10px;
 }
 
-.team-lib-audio-status {
-  flex: 1;
-  font-size: 0.9rem;
-  color: rgba(255, 255, 255, 0.55);
+.media-btn {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 48px;
+  height: 48px;
+  padding: 0;
+  border: none;
+  border-radius: 50%;
+  background: rgba(255, 255, 255, 0.08);
+  color: rgba(255, 255, 255, 0.9);
+  cursor: pointer;
+  -webkit-tap-highlight-color: transparent;
+  transition: background 0.15s ease, transform 0.1s ease;
+}
+
+.media-btn:active {
+  transform: scale(0.94);
+}
+
+.media-btn:focus-visible {
+  outline: 2px solid var(--gold, #c9a227);
+  outline-offset: 2px;
+}
+
+.media-btn--primary {
+  background: rgba(201, 162, 57, 0.28);
+  color: #fbbf24;
+}
+
+.media-btn--primary:hover {
+  background: rgba(201, 162, 57, 0.4);
+}
+
+.media-btn--danger {
+  color: #f87171;
+  background: rgba(248, 113, 113, 0.12);
+}
+
+.media-btn--danger:hover {
+  background: rgba(248, 113, 113, 0.22);
+}
+
+.media-btn__svg {
+  width: 26px;
+  height: 26px;
+  display: block;
 }
 
 .team-lib-audio-player {
   display: flex;
   flex-direction: column;
   gap: 6px;
-  margin-top: 10px;
-  padding: 10px 12px;
-  border-radius: 10px;
-  background: rgba(255, 255, 255, 0.04);
-  border: 1px solid rgba(255, 255, 255, 0.08);
+  width: 100%;
 }
 
 .team-lib-audio-seek {
@@ -1797,6 +1857,41 @@ button.stat-box {
   color: #cbd5e1;
 }
 
+.btn-install {
+  margin-bottom: 14px;
+  min-height: 52px;
+  padding: 12px 20px;
+  border: 1px solid rgba(201, 162, 57, 0.55);
+  background: linear-gradient(135deg, rgba(201, 162, 57, 0.35), rgba(201, 162, 57, 0.18));
+  color: #fef3c7;
+  font-weight: 700;
+  font-size: 1.05rem;
+  box-shadow: 0 4px 20px rgba(201, 162, 57, 0.25);
+}
+
+.btn-install:hover,
+.btn-install:focus-visible {
+  background: linear-gradient(135deg, rgba(201, 162, 57, 0.48), rgba(201, 162, 57, 0.28));
+  color: #fff;
+}
+
+.btn-install__inner {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 10px;
+}
+
+.btn-install__icon {
+  width: 22px;
+  height: 22px;
+  flex-shrink: 0;
+}
+
+.pwa-install-hint {
+  margin-bottom: 12px;
+}
+
 .settings-pwa-actions {
   display: flex;
   flex-direction: column;
@@ -2280,6 +2375,33 @@ html[data-theme='light'] .live-chant-hint {
 
 html[data-theme='light'] .team-lib-audio-status {
   color: var(--muted);
+}
+
+html[data-theme='light'] .team-lib-chant-block {
+  background: rgba(15, 23, 42, 0.04);
+  border-color: rgba(15, 23, 42, 0.1);
+}
+
+html[data-theme='light'] .media-btn {
+  background: rgba(15, 23, 42, 0.06);
+  color: #1e293b;
+}
+
+html[data-theme='light'] .media-btn--primary {
+  background: rgba(201, 162, 57, 0.22);
+  color: #92680a;
+}
+
+html[data-theme='light'] .media-btn--danger {
+  color: #b91c1c;
+  background: rgba(185, 28, 28, 0.08);
+}
+
+html[data-theme='light'] .btn-install {
+  color: #78350f;
+  border-color: rgba(180, 140, 20, 0.5);
+  background: linear-gradient(135deg, rgba(251, 191, 36, 0.45), rgba(251, 191, 36, 0.2));
+  box-shadow: 0 4px 16px rgba(180, 140, 20, 0.2);
 }
 
 html[data-theme='light'] .team-badge {

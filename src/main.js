@@ -2,6 +2,13 @@ import './style.css';
 import { applyTheme, getStoredTheme, setStoredTheme } from './theme.js';
 import { initPwaUpdates, checkForUpdatesManually, forceReloadLatestVersion } from './pwaUpdate.js';
 import {
+  initPwaInstall,
+  shouldShowInstallButton,
+  getPwaInstallHintHtml,
+  pwaInstallButtonHtml,
+} from './pwaInstall.js';
+import { iconMediaPlay, iconMediaPause, iconMediaStop, iconMediaTrash } from './mediaIcons.js';
+import {
   loadMatches,
   saveMatch,
   trySaveMatch,
@@ -90,6 +97,7 @@ function whatsAppTextUrl(text) {
 }
 
 initPwaUpdates();
+initPwaInstall();
 
 function escapeHtml(s) {
   const d = document.createElement('div');
@@ -180,6 +188,31 @@ function applyTeamBadgeAudioChrome(slot) {
 
 function liveChantBellSvg() {
   return `<svg class="live-chant-bell__icon" viewBox="0 0 24 24" aria-hidden="true" focusable="false"><path fill="currentColor" d="M12 22a2 2 0 0 0 2-2h-4a2 2 0 0 0 2 2zm6-6v-5c0-3.07-1.64-5.64-4.5-6.32V4a1.5 1.5 0 0 0-3 0v.68C7.63 5.36 6 7.92 6 11v5l-2 2v1h16v-1l-2-2z"/></svg>`;
+}
+
+function pwaInstallCardHtml() {
+  if (!shouldShowInstallButton()) return '';
+  return `
+    <div class="card settings-block" data-pwa-install-card>
+      <h2>App en el móvil</h2>
+      <p class="settings-lead pwa-install-hint">${getPwaInstallHintHtml()}</p>
+      ${pwaInstallButtonHtml('btn-block')}
+    </div>`;
+}
+
+function bindPwaInstallUi(app) {
+  const card = app.querySelector('[data-pwa-install-card]');
+  if (!card) return;
+  const refresh = () => {
+    if (!shouldShowInstallButton()) {
+      card.remove();
+      return;
+    }
+    const hint = card.querySelector('.pwa-install-hint');
+    if (hint) hint.innerHTML = getPwaInstallHintHtml();
+  };
+  window.addEventListener('pwa-install-available', refresh);
+  refresh();
 }
 
 function attachTeamBadgeSlot(slot, match, side, opts) {
@@ -354,6 +387,7 @@ function viewHome() {
       <h1 class="eyebrow eyebrow--brand">GameScore</h1>
     </div>
     ${upcomingBanner}
+    ${pwaInstallButtonHtml()}
     <div class="stack">
       <button type="button" class="btn btn-primary btn-block" data-act="new">Nuevo partido</button>
       <button type="button" class="btn btn-block" data-act="upcoming">Próximos partidos</button>
@@ -366,6 +400,7 @@ function viewHome() {
 
 function bindHome() {
   const app = document.getElementById('app');
+  bindPwaInstallUi(app);
   app.querySelectorAll('[data-theme-pick]').forEach((btn) => {
     btn.addEventListener('click', (e) => {
       e.stopPropagation();
@@ -1870,6 +1905,7 @@ function viewSettings() {
     <h1>Configuración</h1>
     <p class="msg">Equipos reutilizables y copias de seguridad. Todo se guarda en este dispositivo.</p>
     <div class="stack">
+      ${pwaInstallCardHtml()}
       <div class="card settings-block">
         <h2>Tema</h2>
         <p class="settings-lead">Modo oscuro o claro para toda la aplicación.</p>
@@ -1915,6 +1951,7 @@ function viewSettings() {
 
 function bindSettings() {
   const app = document.getElementById('app');
+  bindPwaInstallUi(app);
   app.querySelector('[data-back]').onclick = () => navigate('home');
 
   app.querySelectorAll('[data-theme-pick]').forEach((btn) => {
@@ -2084,15 +2121,23 @@ function viewTeams() {
         </div>
         <p id="teamLibRecordStatus" class="team-lib-record-status" hidden aria-live="polite"></p>
       </div>
-      <div class="preview-row team-lib-audio-row">
-        <span id="teamLibAudioStatus" class="team-lib-audio-status" aria-live="polite"></span>
-        <button type="button" class="btn btn-ghost" id="teamLibPlayAudio" hidden style="min-height:44px;">Escuchar</button>
-        <button type="button" class="btn btn-ghost" id="teamLibStopPreview" hidden style="min-height:44px;">Parar</button>
-        <button type="button" class="btn btn-ghost" id="teamLibClearAudio" style="min-height:44px;">Quitar audio</button>
-      </div>
-      <div class="team-lib-audio-player" id="teamLibAudioPlayer" hidden>
-        <input type="range" id="teamLibAudioSeek" class="team-lib-audio-seek" min="0" max="1000" value="0" step="1" aria-label="Posición de reproducción" />
-        <span id="teamLibAudioTime" class="team-lib-audio-time">0:00 / 0:00</span>
+      <div class="team-lib-chant-block" id="teamLibChantBlock" hidden>
+        <p id="teamLibAudioStatus" class="team-lib-audio-status" aria-live="polite"></p>
+        <div class="media-toolbar" role="group" aria-label="Controles del cántico">
+          <button type="button" class="media-btn media-btn--primary" id="teamLibPlayAudio" aria-label="Reproducir">
+            ${iconMediaPlay()}
+          </button>
+          <button type="button" class="media-btn" id="teamLibStopPreview" hidden aria-label="Detener">
+            ${iconMediaStop()}
+          </button>
+          <button type="button" class="media-btn media-btn--danger" id="teamLibClearAudio" aria-label="Quitar cántico">
+            ${iconMediaTrash()}
+          </button>
+        </div>
+        <div class="team-lib-audio-player" id="teamLibAudioPlayer">
+          <input type="range" id="teamLibAudioSeek" class="team-lib-audio-seek" min="0" max="1000" value="0" step="1" aria-label="Posición de reproducción" />
+          <span id="teamLibAudioTime" class="team-lib-audio-time">0:00 / 0:00</span>
+        </div>
       </div>
       <div class="team-lib-form-actions">
         <button type="submit" class="btn btn-primary" id="teamLibSubmit">Guardar equipo</button>
@@ -2208,22 +2253,22 @@ function bindTeams() {
   }
 
   function updateAudioStatus() {
+    const block = app.querySelector('#teamLibChantBlock');
     const el = app.querySelector('#teamLibAudioStatus');
     const playBtn = app.querySelector('#teamLibPlayAudio');
     const stopBtn = app.querySelector('#teamLibStopPreview');
-    const player = app.querySelector('#teamLibAudioPlayer');
     const editId = app.querySelector('#teamLibEditId')?.value?.trim();
+    if (block) block.hidden = !pendingAudio;
     if (el) {
       if (!pendingAudio) el.textContent = '';
-      else if (editId) el.textContent = 'Cántico listo (se guarda al detener la grabación o al pulsar «Guardar cambios»)';
-      else el.textContent = 'Cántico listo — pulsa «Guardar equipo» para conservarlo';
+      else if (editId) el.textContent = 'Cántico listo. Se guarda al detener la grabación o con «Guardar cambios».';
+      else el.textContent = 'Cántico listo. Pulsa «Guardar equipo» para conservarlo.';
     }
     if (playBtn) {
-      playBtn.hidden = !pendingAudio;
-      playBtn.textContent = previewPlaying ? 'Pausar' : 'Escuchar';
+      playBtn.innerHTML = previewPlaying ? iconMediaPause() : iconMediaPlay();
+      playBtn.setAttribute('aria-label', previewPlaying ? 'Pausar' : 'Reproducir');
     }
-    if (stopBtn) stopBtn.hidden = !previewPlaying;
-    if (player) player.hidden = !pendingAudio;
+    if (stopBtn) stopBtn.hidden = !previewAudioEl && !previewPlaying;
     if (!pendingAudio) {
       const timeEl = app.querySelector('#teamLibAudioTime');
       if (timeEl) timeEl.textContent = '0:00 / 0:00';

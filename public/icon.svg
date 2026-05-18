@@ -1,5 +1,19 @@
-<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 512 512">
-  <rect width="512" height="512" rx="96" fill="#1e293b"/>
-  <rect x="64" y="160" width="384" height="192" rx="16" fill="#334155" stroke="#94a3b8" stroke-width="8"/>
-  <text x="256" y="290" text-anchor="middle" font-family="system-ui,sans-serif" font-size="120" font-weight="700" fill="#f8fafc">0 - 0</text>
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 512 512" role="img" aria-label="GameScore">
+  <defs>
+    <linearGradient id="bg" x1="0%" y1="0%" x2="100%" y2="100%">
+      <stop offset="0%" stop-color="#132f4c"/>
+      <stop offset="55%" stop-color="#0a1628"/>
+      <stop offset="100%" stop-color="#060b12"/>
+    </linearGradient>
+    <linearGradient id="gold" x1="0%" y1="0%" x2="0%" y2="100%">
+      <stop offset="0%" stop-color="#eab308"/>
+      <stop offset="50%" stop-color="#c9a227"/>
+      <stop offset="100%" stop-color="#92680a"/>
+    </linearGradient>
+  </defs>
+  <rect width="512" height="512" rx="108" fill="url(#bg)"/>
+  <rect x="72" y="148" width="368" height="216" rx="28" fill="#1e293b" stroke="url(#gold)" stroke-width="10"/>
+  <circle cx="118" cy="188" r="9" fill="#22c55e"/>
+  <text x="256" y="302" text-anchor="middle" font-family="Impact, 'Arial Black', 'Segoe UI', sans-serif" font-size="132" font-weight="700" fill="#f8fafc" letter-spacing="-4">0 - 0</text>
+  <rect x="156" y="392" width="200" height="6" rx="3" fill="url(#gold)" opacity="0.9"/>
 </svg>

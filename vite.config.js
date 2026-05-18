@@ -14,7 +14,15 @@ export default defineConfig({
       devOptions: {
         enabled: true
       },
-      includeAssets: ['icon.svg', 'apple-touch-icon.png', 'pwa-192x192.png', 'pwa-512x512.png'],
+      includeAssets: [
+        'icon.svg',
+        'icon-maskable.svg',
+        'favicon-16x16.png',
+        'favicon-32x32.png',
+        'apple-touch-icon.png',
+        'pwa-192x192.png',
+        'pwa-512x512.png'
+      ],
       manifest: {
         name: 'GameScore',
         short_name: 'GameScore',
@@ -45,6 +53,12 @@ export default defineConfig({
             src: '/pwa-512x512.png',
             sizes: '512x512',
             type: 'image/png',
+            purpose: 'maskable'
+          },
+          {
+            src: '/icon-maskable.svg',
+            sizes: 'any',
+            type: 'image/svg+xml',
             purpose: 'maskable'
           }
         ]

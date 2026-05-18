@@ -6,6 +6,7 @@
   "scripts": {
     "dev": "vite",
     "build": "vite build",
+    "icons": "powershell -ExecutionPolicy Bypass -File scripts/generate-icons.ps1",
     "preview": "vite preview"
   },
   "devDependencies": {
